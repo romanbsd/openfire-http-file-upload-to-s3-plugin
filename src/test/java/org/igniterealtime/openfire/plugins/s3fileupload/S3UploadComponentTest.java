@@ -124,7 +124,7 @@ class S3UploadComponentTest {
     @Test
     void reportsUnavailableConfigurationAndSlotFailures() {
         final S3UploadConfiguration invalid = new S3UploadConfiguration(
-            "", "us-east-1", "", false, "", "upload", 1024,
+            "", "us-east-1", "", false, true, "", "", "", "upload", 1024,
             Duration.ofMinutes(5), Duration.ofHours(1));
         final S3UploadComponent unavailable = new S3UploadComponent(invalid);
         final FakeSlotService failingService = new FakeSlotService();
@@ -229,7 +229,7 @@ class S3UploadComponentTest {
     }
 
     private static S3UploadConfiguration configuration(long maxSize) {
-        return new S3UploadConfiguration("files", "us-east-1", "", false, "xmpp", "upload",
+        return new S3UploadConfiguration("files", "us-east-1", "", false, true, "", "", "xmpp", "upload",
             maxSize, Duration.ofMinutes(5), Duration.ofDays(7));
     }
 

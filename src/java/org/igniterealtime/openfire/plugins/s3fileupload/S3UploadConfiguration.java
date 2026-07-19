@@ -17,6 +17,9 @@ public record S3UploadConfiguration(
     String region,
     String endpoint,
     boolean pathStyleAccess,
+    boolean useDefaultAwsCredentials,
+    String accessKey,
+    String secretKey,
     String keyPrefix,
     String serviceSubdomain,
     long maxFileSize,
@@ -32,6 +35,8 @@ public record S3UploadConfiguration(
         bucket = trim(bucket);
         region = trim(region);
         endpoint = trim(endpoint);
+        accessKey = trim(accessKey);
+        secretKey = secretKey == null ? "" : secretKey;
         keyPrefix = normalizePrefix(keyPrefix);
         serviceSubdomain = trim(serviceSubdomain);
         Objects.requireNonNull(putExpiration, "putExpiration");
@@ -50,6 +55,12 @@ public record S3UploadConfiguration(
         if (region.isEmpty()) {
             errors.add("AWS region is required");
         }
+        if (!useDefaultAwsCredentials && accessKey.isEmpty()) {
+            errors.add("S3 access key is required when the default AWS credential chain is disabled");
+        }
+        if (!useDefaultAwsCredentials && secretKey.isEmpty()) {
+            errors.add("S3 secret key is required when the default AWS credential chain is disabled");
+        }
         if (!hasValidServiceSubdomain()) {
             errors.add("Service subdomain is invalid");
         }
@@ -64,6 +75,15 @@ public record S3UploadConfiguration(
 
     public URI endpointUri() {
         return endpoint.isEmpty() ? null : URI.create(endpoint);
+    }
+
+    @Override
+    public String toString() {
+        return ("S3UploadConfiguration[bucket=%s, region=%s, endpoint=%s, pathStyleAccess=%s, "
+            + "useDefaultAwsCredentials=%s, credentials=<redacted>, keyPrefix=%s, serviceSubdomain=%s, "
+            + "maxFileSize=%d, putExpiration=%s, getExpiration=%s]")
+            .formatted(bucket, region, endpoint, pathStyleAccess, useDefaultAwsCredentials, keyPrefix,
+                serviceSubdomain, maxFileSize, putExpiration, getExpiration);
     }
 
     boolean hasValidServiceSubdomain() {

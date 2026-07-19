@@ -15,6 +15,7 @@
 <%
     final S3FileUploadPlugin plugin = (S3FileUploadPlugin) XMPPServer.getInstance()
         .getPluginManager().getPluginByName("S3 HTTP File Upload").orElseThrow();
+    final S3UploadConfiguration existingConfiguration = plugin.configuration();
     final List<String> errors = new ArrayList<>();
     boolean saved = false;
 
@@ -23,6 +24,14 @@
         final String region = request.getParameter("region");
         final String endpoint = request.getParameter("endpoint");
         final boolean pathStyleAccess = ParamUtils.getBooleanParameter(request, "pathStyleAccess");
+        final boolean useDefaultAwsCredentials =
+            ParamUtils.getBooleanParameter(request, "useDefaultAwsCredentials");
+        final String submittedAccessKey = request.getParameter("accessKey");
+        final String submittedSecretKey = request.getParameter("secretKey");
+        final String accessKey = useDefaultAwsCredentials ? "" : submittedAccessKey;
+        final String secretKey = useDefaultAwsCredentials ? ""
+            : submittedSecretKey == null || submittedSecretKey.isEmpty()
+                ? existingConfiguration.secretKey() : submittedSecretKey;
         final String keyPrefix = request.getParameter("keyPrefix");
         final String serviceSubdomain = request.getParameter("serviceSubdomain");
         final long maxFileSize = ParamUtils.getLongParameter(request, "maxFileSize",
@@ -33,7 +42,8 @@
             S3FileUploadPlugin.GET_EXPIRATION_SECONDS.getDefaultValue());
 
         final S3UploadConfiguration candidate = new S3UploadConfiguration(
-            bucket, region, endpoint, pathStyleAccess, keyPrefix, serviceSubdomain, maxFileSize,
+            bucket, region, endpoint, pathStyleAccess, useDefaultAwsCredentials, accessKey, secretKey,
+            keyPrefix, serviceSubdomain, maxFileSize,
             Duration.ofSeconds(putExpirationSeconds), Duration.ofSeconds(getExpirationSeconds));
         errors.addAll(candidate.validationErrors());
 
@@ -42,6 +52,7 @@
             webManager.logEvent("Changed S3 HTTP File Upload settings",
                 "bucket=" + bucket + ", region=" + region + ", endpoint=" + endpoint
                     + ", pathStyleAccess=" + pathStyleAccess + ", keyPrefix=" + keyPrefix
+                    + ", useDefaultAwsCredentials=" + useDefaultAwsCredentials
                     + ", serviceSubdomain=" + serviceSubdomain + ", maxFileSize=" + maxFileSize
                     + ", putExpirationSeconds=" + putExpirationSeconds
                     + ", getExpirationSeconds=" + getExpirationSeconds);
@@ -57,6 +68,9 @@
     request.setAttribute("region", configuration.region());
     request.setAttribute("endpoint", configuration.endpoint());
     request.setAttribute("pathStyleAccess", configuration.pathStyleAccess());
+    request.setAttribute("useDefaultAwsCredentials", configuration.useDefaultAwsCredentials());
+    request.setAttribute("accessKey", configuration.accessKey());
+    request.setAttribute("secretKeyConfigured", !configuration.secretKey().isEmpty());
     request.setAttribute("keyPrefix", configuration.keyPrefix());
     request.setAttribute("serviceSubdomain", configuration.serviceSubdomain());
     request.setAttribute("maxFileSize", configuration.maxFileSize());
@@ -100,6 +114,9 @@
             <tr><td><label for="region">Region</label></td><td><input id="region" name="region" size="30" maxlength="100" value="<c:out value='${region}'/>" required /></td></tr>
             <tr><td><label for="endpoint">Endpoint override</label></td><td><input id="endpoint" name="endpoint" size="70" maxlength="500" value="<c:out value='${endpoint}'/>" placeholder="https://s3.example.com" /></td></tr>
             <tr><td><label for="pathStyleAccess">Path-style access</label></td><td><input id="pathStyleAccess" name="pathStyleAccess" type="checkbox" <c:if test="${pathStyleAccess}">checked</c:if> /></td></tr>
+            <tr><td><label for="useDefaultAwsCredentials">Default AWS credential chain</label></td><td><input id="useDefaultAwsCredentials" name="useDefaultAwsCredentials" type="checkbox" <c:if test="${useDefaultAwsCredentials}">checked</c:if> /> Use environment, system properties, profiles, web identity, ECS or EC2 credentials</td></tr>
+            <tr><td><label for="accessKey">Access key</label></td><td><input id="accessKey" name="accessKey" size="50" maxlength="255" autocomplete="off" value="<c:out value='${accessKey}'/>" /> Required when the default credential chain is disabled</td></tr>
+            <tr><td><label for="secretKey">Secret key</label></td><td><input id="secretKey" name="secretKey" type="password" size="50" maxlength="1024" autocomplete="new-password" value="" placeholder="Leave blank to keep the configured secret" /> <c:if test="${secretKeyConfigured}">A secret key is configured.</c:if></td></tr>
             <tr><td><label for="keyPrefix">Object key prefix</label></td><td><input id="keyPrefix" name="keyPrefix" size="50" maxlength="500" value="<c:out value='${keyPrefix}'/>" /></td></tr>
         </table>
     </admin:contentBox>

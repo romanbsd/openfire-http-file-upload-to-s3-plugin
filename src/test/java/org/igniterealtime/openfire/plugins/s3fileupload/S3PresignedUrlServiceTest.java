@@ -47,7 +47,7 @@ class S3PresignedUrlServiceTest {
     @Test
     void validatesConfigurationBeforeCreatingDefaultPresigner() {
         final S3UploadConfiguration invalid = new S3UploadConfiguration(
-            "", "", "", false, "", "upload", 1024,
+            "", "", "", false, true, "", "", "", "upload", 1024,
             Duration.ofMinutes(5), Duration.ofHours(1));
 
         final IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
@@ -64,9 +64,25 @@ class S3PresignedUrlServiceTest {
         }
     }
 
+    @Test
+    void signsWithConfiguredStaticCredentials() {
+        final S3UploadConfiguration configuration = new S3UploadConfiguration(
+            "files", "us-east-1", "https://s3.example.test", true,
+            false, "configured-access", "configured-secret", "xmpp", "upload",
+            1024, Duration.ofMinutes(5), Duration.ofHours(1));
+
+        try (S3PresignedUrlService service = new S3PresignedUrlService(configuration)) {
+            final UploadSlot slot = service.createSlot(new UploadRequest("static.txt", 12, "text/plain"));
+
+            assertTrue(slot.putUrl().startsWith("https://s3.example.test/files/"));
+            assertTrue(slot.putUrl().contains("X-Amz-Credential=configured-access%2F"));
+            assertTrue(slot.getUrl().contains("X-Amz-Credential=configured-access%2F"));
+        }
+    }
+
     private static S3UploadConfiguration configuration() {
         return new S3UploadConfiguration(
-            "files", "us-east-1", "https://s3.example.test", true, "xmpp", "upload",
+            "files", "us-east-1", "https://s3.example.test", true, true, "", "", "xmpp", "upload",
             1024, Duration.ofMinutes(5), Duration.ofHours(1));
     }
 

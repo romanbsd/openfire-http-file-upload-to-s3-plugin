@@ -6,7 +6,10 @@ package org.igniterealtime.openfire.plugins.s3fileupload;
 import java.util.List;
 import java.util.Objects;
 
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -78,7 +81,7 @@ final class S3PresignedUrlService implements UploadSlotService {
     private static S3Presigner createPresigner(S3UploadConfiguration configuration) {
         final S3Presigner.Builder builder = S3Presigner.builder()
             .region(Region.of(configuration.region()))
-            .credentialsProvider(DefaultCredentialsProvider.create())
+            .credentialsProvider(credentialsProvider(configuration))
             .serviceConfiguration(S3Configuration.builder()
                 .pathStyleAccessEnabled(configuration.pathStyleAccess())
                 .checksumValidationEnabled(false)
@@ -87,6 +90,14 @@ final class S3PresignedUrlService implements UploadSlotService {
             builder.endpointOverride(configuration.endpointUri());
         }
         return builder.build();
+    }
+
+    private static AwsCredentialsProvider credentialsProvider(S3UploadConfiguration configuration) {
+        if (configuration.useDefaultAwsCredentials()) {
+            return DefaultCredentialsProvider.create();
+        }
+        return StaticCredentialsProvider.create(
+            AwsBasicCredentials.create(configuration.accessKey(), configuration.secretKey()));
     }
 
     private static S3UploadConfiguration requireValid(S3UploadConfiguration configuration) {

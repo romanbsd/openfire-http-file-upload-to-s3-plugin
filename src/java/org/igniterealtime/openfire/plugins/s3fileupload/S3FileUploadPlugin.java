@@ -25,12 +25,11 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
     public static final SystemProperty<String> BUCKET = stringProperty("bucket", "");
     public static final SystemProperty<String> REGION = stringProperty("region", "us-east-1");
     public static final SystemProperty<String> ENDPOINT = stringProperty("endpoint", "");
-    public static final SystemProperty<Boolean> PATH_STYLE_ACCESS = SystemProperty.Builder.ofType(Boolean.class)
-        .setKey(PROPERTY_PREFIX + "pathStyleAccess")
-        .setDefaultValue(false)
-        .setDynamic(true)
-        .setPlugin(PLUGIN_NAME)
-        .build();
+    public static final SystemProperty<Boolean> PATH_STYLE_ACCESS = booleanProperty("pathStyleAccess", false);
+    public static final SystemProperty<Boolean> USE_DEFAULT_AWS_CREDENTIALS =
+        booleanProperty("useDefaultAwsCredentials", true);
+    public static final SystemProperty<String> ACCESS_KEY = stringProperty("accessKey", "");
+    public static final SystemProperty<String> SECRET_KEY = stringProperty("secretKey", "", true);
     public static final SystemProperty<String> KEY_PREFIX = stringProperty("keyPrefix", "xmpp-uploads");
     public static final SystemProperty<String> SERVICE_SUBDOMAIN = stringProperty("serviceSubdomain", "upload");
     public static final SystemProperty<Long> MAX_FILE_SIZE = SystemProperty.Builder.ofType(Long.class)
@@ -114,6 +113,9 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
             REGION.setValue(configuration.region());
             ENDPOINT.setValue(configuration.endpoint());
             PATH_STYLE_ACCESS.setValue(configuration.pathStyleAccess());
+            USE_DEFAULT_AWS_CREDENTIALS.setValue(configuration.useDefaultAwsCredentials());
+            ACCESS_KEY.setValue(configuration.accessKey());
+            SECRET_KEY.setValue(configuration.secretKey());
             KEY_PREFIX.setValue(configuration.keyPrefix());
             SERVICE_SUBDOMAIN.setValue(configuration.serviceSubdomain());
             MAX_FILE_SIZE.setValue(configuration.maxFileSize());
@@ -131,6 +133,9 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
             REGION.getValue(),
             ENDPOINT.getValue(),
             PATH_STYLE_ACCESS.getValue(),
+            USE_DEFAULT_AWS_CREDENTIALS.getValue(),
+            ACCESS_KEY.getValue(),
+            SECRET_KEY.getValue(),
             KEY_PREFIX.getValue(),
             SERVICE_SUBDOMAIN.getValue(),
             MAX_FILE_SIZE.getValue(),
@@ -184,7 +189,25 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
     }
 
     private static SystemProperty<String> stringProperty(String suffix, String defaultValue) {
+        return stringProperty(suffix, defaultValue, false);
+    }
+
+    private static SystemProperty<String> stringProperty(
+        String suffix,
+        String defaultValue,
+        boolean encrypted
+    ) {
         return SystemProperty.Builder.ofType(String.class)
+            .setKey(PROPERTY_PREFIX + suffix)
+            .setDefaultValue(defaultValue)
+            .setDynamic(true)
+            .setEncrypted(encrypted)
+            .setPlugin(PLUGIN_NAME)
+            .build();
+    }
+
+    private static SystemProperty<Integer> integerProperty(String suffix, int defaultValue) {
+        return SystemProperty.Builder.ofType(Integer.class)
             .setKey(PROPERTY_PREFIX + suffix)
             .setDefaultValue(defaultValue)
             .setDynamic(true)
@@ -192,8 +215,8 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
             .build();
     }
 
-    private static SystemProperty<Integer> integerProperty(String suffix, int defaultValue) {
-        return SystemProperty.Builder.ofType(Integer.class)
+    private static SystemProperty<Boolean> booleanProperty(String suffix, boolean defaultValue) {
+        return SystemProperty.Builder.ofType(Boolean.class)
             .setKey(PROPERTY_PREFIX + suffix)
             .setDefaultValue(defaultValue)
             .setDynamic(true)

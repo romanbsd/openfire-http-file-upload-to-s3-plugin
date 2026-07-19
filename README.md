@@ -14,9 +14,11 @@ mvn clean package
 
 Rename `target/s3fileupload-openfire-plugin-assembly.jar` to `s3fileupload.jar`, copy it to Openfire's `plugins/` directory, and configure it under **Server → Server Settings → S3 File Upload**.
 
-## AWS credentials
+## Credentials
 
-The plugin deliberately does not store access keys. It uses the AWS SDK v2 default credential chain, including Java system properties, environment variables, web identity, shared AWS configuration, ECS task credentials, and EC2 instance profile credentials. Prefer a workload identity or instance/task role.
+By default, the plugin uses the AWS SDK v2 credential chain, including Java system properties, environment variables, web identity, shared AWS configuration, ECS task credentials, and EC2 instance profile credentials. Prefer a workload identity or instance/task role when using AWS.
+
+For MinIO and other S3-compatible services, disable the default credential chain and configure a static access key and secret key. The secret is stored as an encrypted Openfire property so that every cluster node can sign URLs, and is never rendered back into the administration page. Restrict access to the Openfire database and administration console accordingly.
 
 The identity needs permission to sign requests for these operations:
 
@@ -41,6 +43,9 @@ All settings are regular Openfire properties and are shared by cluster nodes.
 | `plugin.s3fileupload.region` | `us-east-1` | Signing region |
 | `plugin.s3fileupload.endpoint` | empty | Optional S3-compatible endpoint override |
 | `plugin.s3fileupload.pathStyleAccess` | `false` | Enable path-style requests for compatible storage |
+| `plugin.s3fileupload.useDefaultAwsCredentials` | `true` | Use the AWS SDK default credential chain instead of static credentials |
+| `plugin.s3fileupload.accessKey` | empty | Static access key when the default credential chain is disabled |
+| `plugin.s3fileupload.secretKey` | empty | Static secret key when the default credential chain is disabled |
 | `plugin.s3fileupload.keyPrefix` | `xmpp-uploads` | Prefix for generated randomized object keys |
 | `plugin.s3fileupload.serviceSubdomain` | `upload` | Component subdomain (`upload.example.org`) |
 | `plugin.s3fileupload.maxFileSize` | `104857600` | Maximum bytes; `-1` disables the limit |
@@ -61,4 +66,15 @@ For browser clients, configure bucket CORS to allow `PUT`, `GET`, and `HEAD` fro
 
 ## S3-compatible services
 
-Set the endpoint override and, when required, path-style access. The service must implement AWS Signature Version 4 presigned PUT and GET requests. Provider-specific maximum signature lifetimes can be shorter than seven days.
+Set the endpoint override, choose the credential mode and, when required, enable path-style access. The service must implement AWS Signature Version 4 presigned PUT and GET requests. Provider-specific maximum signature lifetimes can be shorter than seven days.
+
+Example MinIO-style configuration:
+
+```properties
+plugin.s3fileupload.endpoint=https://minio.example.org
+plugin.s3fileupload.region=us-east-1
+plugin.s3fileupload.pathStyleAccess=true
+plugin.s3fileupload.useDefaultAwsCredentials=false
+plugin.s3fileupload.accessKey=minio-access-key
+plugin.s3fileupload.secretKey=minio-secret-key
+```
