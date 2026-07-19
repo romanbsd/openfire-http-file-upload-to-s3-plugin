@@ -25,8 +25,8 @@ public record S3UploadConfiguration(
 ) {
     static final int MAX_FILENAME_BYTES = 255;
     static final Duration MAX_PRESIGN_DURATION = Duration.ofDays(7);
-    private static final Pattern SUBDOMAIN =
-        Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?");
+    private static final String DNS_LABEL = "[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?";
+    private static final Pattern SUBDOMAIN = Pattern.compile(DNS_LABEL + "(?:\\." + DNS_LABEL + ")*");
 
     public S3UploadConfiguration {
         bucket = trim(bucket);
@@ -67,7 +67,7 @@ public record S3UploadConfiguration(
     }
 
     boolean hasValidServiceSubdomain() {
-        return SUBDOMAIN.matcher(serviceSubdomain).matches();
+        return serviceSubdomain.length() <= 253 && SUBDOMAIN.matcher(serviceSubdomain).matches();
     }
 
     private void validateEndpoint(List<String> errors) {

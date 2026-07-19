@@ -44,7 +44,9 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
 
     private S3UploadComponent component;
     private String registeredSubdomain;
+    private S3UploadConfiguration appliedConfiguration;
     private boolean initialized;
+    private boolean reloadSuspended;
 
     @Override
     public synchronized void initializePlugin(PluginManager manager, File pluginDirectory) {
@@ -63,23 +65,37 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
         }
         component = null;
         registeredSubdomain = null;
+        appliedConfiguration = null;
         Log.info("S3 HTTP File Upload plugin destroyed");
     }
 
     public synchronized void reloadConfiguration() {
-        if (!initialized) {
+        if (!initialized || reloadSuspended) {
             return;
         }
         final S3UploadConfiguration configuration = configuration();
-        final String requestedSubdomain = configuration.serviceSubdomain();
+        if (component != null && configuration.equals(appliedConfiguration)) {
+            return;
+        }
 
-        if ((component == null || !requestedSubdomain.equals(registeredSubdomain))
-            && configuration.hasValidServiceSubdomain()) {
-            installComponent(configuration);
-        } else if (component != null) {
-            component.reconfigure(configuration);
-        } else {
-            Log.error("Cannot register S3 upload component: invalid service subdomain '{}'.", requestedSubdomain);
+        try {
+            if (!configuration.hasValidServiceSubdomain()) {
+                Log.error("Cannot register S3 upload component: invalid service subdomain '{}'.",
+                    configuration.serviceSubdomain());
+                if (component != null) {
+                    component.reconfigure(configuration);
+                }
+            } else if (component == null || !configuration.serviceSubdomain().equals(registeredSubdomain)) {
+                if (!installComponent(configuration)) {
+                    return; // leave appliedConfiguration stale so the next property event retries
+                }
+            } else {
+                component.reconfigure(configuration);
+            }
+            appliedConfiguration = configuration;
+        } catch (RuntimeException e) {
+            Log.error("Unable to apply S3 upload configuration.", e);
+            return;
         }
 
         if (configuration.isReady()) {
@@ -88,6 +104,25 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
         } else {
             Log.warn("S3 upload service is not ready: {}", String.join("; ", configuration.validationErrors()));
         }
+    }
+
+    /** Applies all settings in one step, reloading the service once instead of per property. */
+    public synchronized void applyConfiguration(S3UploadConfiguration configuration) {
+        reloadSuspended = true;
+        try {
+            BUCKET.setValue(configuration.bucket());
+            REGION.setValue(configuration.region());
+            ENDPOINT.setValue(configuration.endpoint());
+            PATH_STYLE_ACCESS.setValue(configuration.pathStyleAccess());
+            KEY_PREFIX.setValue(configuration.keyPrefix());
+            SERVICE_SUBDOMAIN.setValue(configuration.serviceSubdomain());
+            MAX_FILE_SIZE.setValue(configuration.maxFileSize());
+            PUT_EXPIRATION_SECONDS.setValue((int) configuration.putExpiration().toSeconds());
+            GET_EXPIRATION_SECONDS.setValue((int) configuration.getExpiration().toSeconds());
+        } finally {
+            reloadSuspended = false;
+        }
+        reloadConfiguration();
     }
 
     public S3UploadConfiguration configuration() {
@@ -126,24 +161,25 @@ public final class S3FileUploadPlugin implements Plugin, PropertyEventListener {
         // This plugin intentionally uses database-backed Openfire properties for cluster-wide consistency.
     }
 
-    private void installComponent(S3UploadConfiguration configuration) {
-        final S3UploadComponent previous = component;
-        final String previousSubdomain = registeredSubdomain;
+    private boolean installComponent(S3UploadConfiguration configuration) {
+        // Tear down first, then recreate: one code path, at the cost of a brief service gap
+        // during an admin-initiated subdomain change.
+        if (component != null) {
+            InternalComponentManager.getInstance().removeComponent(registeredSubdomain, component);
+            component = null;
+            registeredSubdomain = null;
+        }
         final S3UploadComponent candidate = new S3UploadComponent(configuration);
         try {
             InternalComponentManager.getInstance().addComponent(configuration.serviceSubdomain(), candidate);
             component = candidate;
             registeredSubdomain = configuration.serviceSubdomain();
-            if (previous != null) {
-                InternalComponentManager.getInstance().removeComponent(previousSubdomain, previous);
-            }
+            return true;
         } catch (ComponentException e) {
             candidate.preComponentShutdown();
-            if (previous != null) {
-                previous.reconfigure(configuration);
-            }
             Log.error("Unable to register S3 upload component at subdomain '{}'.",
                 configuration.serviceSubdomain(), e);
+            return false;
         }
     }
 

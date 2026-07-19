@@ -5,6 +5,7 @@ package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 
 import org.dom4j.Element;
@@ -16,7 +17,7 @@ final class S3UploadComponent extends AbstractComponent {
     static final String UPLOAD_NAMESPACE = "urn:xmpp:http:upload:0";
     private static final String DATA_FORMS_NAMESPACE = "jabber:x:data";
 
-    private final Object serviceLock = new Object();
+    private final ReentrantReadWriteLock serviceLifecycleLock = new ReentrantReadWriteLock(true);
     private final Function<S3UploadConfiguration, UploadSlotService> serviceFactory;
     private volatile S3UploadConfiguration configuration;
     private UploadSlotService slotService;
@@ -33,7 +34,6 @@ final class S3UploadComponent extends AbstractComponent {
         S3UploadConfiguration configuration,
         Function<S3UploadConfiguration, UploadSlotService> serviceFactory
     ) {
-        super(1, 4, true);
         this.configuration = Objects.requireNonNull(configuration);
         this.serviceFactory = Objects.requireNonNull(serviceFactory);
         this.slotService = serviceFactory.apply(configuration);
@@ -100,8 +100,12 @@ final class S3UploadComponent extends AbstractComponent {
     }
 
     IQ handleSlotRequest(IQ iq) {
-        synchronized (serviceLock) {
+        // Readers presign concurrently; writers cannot close a service until its active requests finish.
+        serviceLifecycleLock.readLock().lock();
+        try {
             return handleSlotRequest(iq, configuration, slotService);
+        } finally {
+            serviceLifecycleLock.readLock().unlock();
         }
     }
 
@@ -122,9 +126,9 @@ final class S3UploadComponent extends AbstractComponent {
                 "filename must contain 1 to 255 UTF-8 bytes and no control characters");
         }
 
-        final long size = parsePositiveLong(request.attributeValue("size"));
+        final long size = parseSize(request.attributeValue("size"));
         if (size < 0) {
-            return badRequest(iq, "size must be a positive integer");
+            return badRequest(iq, "size must be a non-negative integer");
         }
 
         if (current.maxFileSize() > -1 && size > current.maxFileSize()) {
@@ -159,26 +163,33 @@ final class S3UploadComponent extends AbstractComponent {
         }
     }
 
+    @SuppressWarnings("ReferenceEquality") // guards against closing the service we just installed
     void reconfigure(S3UploadConfiguration newConfiguration) {
         Objects.requireNonNull(newConfiguration);
         final UploadSlotService replacement = serviceFactory.apply(newConfiguration);
-        synchronized (serviceLock) {
+        serviceLifecycleLock.writeLock().lock();
+        try {
             final UploadSlotService previous = slotService;
             configuration = newConfiguration;
             slotService = replacement;
-            if (previous != null) {
+            if (previous != null && previous != replacement) {
                 previous.close();
             }
+        } finally {
+            serviceLifecycleLock.writeLock().unlock();
         }
     }
 
     @Override
     public void preComponentShutdown() {
-        synchronized (serviceLock) {
+        serviceLifecycleLock.writeLock().lock();
+        try {
             if (slotService != null) {
                 slotService.close();
                 slotService = null;
             }
+        } finally {
+            serviceLifecycleLock.writeLock().unlock();
         }
     }
 
@@ -201,7 +212,10 @@ final class S3UploadComponent extends AbstractComponent {
     }
 
     private static boolean isInvalidFilename(String filename) {
+        // "." and ".." survive into the object key as a URL path segment, which HTTP clients
+        // normalize away before sending - breaking the SigV4 signature.
         return filename == null || filename.isBlank()
+            || ".".equals(filename) || "..".equals(filename)
             || filename.getBytes(StandardCharsets.UTF_8).length > S3UploadConfiguration.MAX_FILENAME_BYTES
             || containsControlCharacter(filename);
     }
@@ -210,11 +224,14 @@ final class S3UploadComponent extends AbstractComponent {
         return contentType.length() > 255 || containsControlCharacter(contentType);
     }
 
-    private static long parsePositiveLong(String value) {
+    private static long parseSize(String value) {
+        if (value == null) {
+            return -1;
+        }
         try {
             final long parsed = Long.parseLong(value);
-            return parsed > 0 ? parsed : -1;
-        } catch (NumberFormatException | NullPointerException e) {
+            return parsed >= 0 ? parsed : -1;
+        } catch (NumberFormatException e) {
             return -1;
         }
     }

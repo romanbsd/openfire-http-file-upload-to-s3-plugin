@@ -1,11 +1,17 @@
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.dom4j.Element;
@@ -82,12 +88,37 @@ class S3UploadComponentTest {
         assertError(component.handleSlotRequest(request("bad\nname", "1", null)), PacketError.Condition.bad_request);
         assertError(component.handleSlotRequest(request("é".repeat(128), "1", null)),
             PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request(".", "1", null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("..", "1", null)), PacketError.Condition.bad_request);
         assertError(component.handleSlotRequest(request("file.txt", null, null)), PacketError.Condition.bad_request);
-        assertError(component.handleSlotRequest(request("file.txt", "0", null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("file.txt", "-1", null)), PacketError.Condition.bad_request);
         assertError(component.handleSlotRequest(request("file.txt", "not-a-number", null)),
             PacketError.Condition.bad_request);
         assertError(component.handleSlotRequest(request("file.txt", "1", "text/plain\ninvalid")),
             PacketError.Condition.bad_request);
+    }
+
+    @Test
+    void acceptsZeroByteFiles() {
+        final FakeSlotService service = new FakeSlotService();
+        final S3UploadComponent component = new S3UploadComponent(configuration(1024), service);
+
+        final IQ response = component.handleSlotRequest(request("empty.txt", "0", null));
+
+        assertEquals(IQ.Type.result, response.getType());
+        assertEquals(0, service.lastRequest.size());
+    }
+
+    @Test
+    void reconfigureKeepsAFixedServiceOpen() {
+        final FakeSlotService service = new FakeSlotService();
+        final S3UploadComponent component = new S3UploadComponent(configuration(10), service);
+
+        component.reconfigure(configuration(20));
+        final IQ response = component.handleSlotRequest(request("still-works.txt", "1", null));
+
+        assertFalse(service.closed);
+        assertEquals(IQ.Type.result, response.getType());
     }
 
     @Test
@@ -126,6 +157,45 @@ class S3UploadComponentTest {
         assertTrue(second.closed);
         assertError(component.handleSlotRequest(request("after-shutdown.txt", "1", null)),
             PacketError.Condition.service_unavailable);
+    }
+
+    @Test
+    void reconfigureWaitsForInFlightPresignBeforeClosingService() throws Exception {
+        final CountDownLatch signingStarted = new CountDownLatch(1);
+        final CountDownLatch releaseSigning = new CountDownLatch(1);
+        final CountDownLatch replacementCreated = new CountDownLatch(1);
+        final FakeSlotService firstDelegate = new FakeSlotService();
+        final UploadSlotService first = new BlockingSlotService(firstDelegate, signingStarted, releaseSigning);
+        final FakeSlotService second = new FakeSlotService();
+        final List<UploadSlotService> services = List.of(first, second);
+        final AtomicInteger nextService = new AtomicInteger();
+        final S3UploadComponent component = new S3UploadComponent(configuration(10), ignored -> {
+            final int index = nextService.getAndIncrement();
+            if (index > 0) {
+                replacementCreated.countDown();
+            }
+            return services.get(index);
+        });
+        final ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            final Future<IQ> upload = executor.submit(
+                () -> component.handleSlotRequest(request("in-flight.txt", "1", null)));
+            assertTrue(signingStarted.await(5, TimeUnit.SECONDS));
+
+            final Future<?> reload = executor.submit(() -> component.reconfigure(configuration(20)));
+            assertTrue(replacementCreated.await(5, TimeUnit.SECONDS));
+            assertFalse(reload.isDone());
+
+            releaseSigning.countDown();
+            assertEquals(IQ.Type.result, upload.get(5, TimeUnit.SECONDS).getType());
+            reload.get(5, TimeUnit.SECONDS);
+            assertTrue(firstDelegate.closed);
+        } finally {
+            releaseSigning.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     private static IQ request(String filename, String size, String contentType) {
@@ -180,6 +250,31 @@ class S3UploadComponentTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    private record BlockingSlotService(
+        FakeSlotService delegate,
+        CountDownLatch signingStarted,
+        CountDownLatch releaseSigning
+    ) implements UploadSlotService {
+        @Override
+        public UploadSlot createSlot(UploadRequest request) {
+            signingStarted.countDown();
+            try {
+                if (!releaseSigning.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to finish signing");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Signing interrupted", e);
+            }
+            return delegate.createSlot(request);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
         }
     }
 }

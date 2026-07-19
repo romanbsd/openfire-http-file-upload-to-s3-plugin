@@ -25,9 +25,12 @@
         final boolean pathStyleAccess = ParamUtils.getBooleanParameter(request, "pathStyleAccess");
         final String keyPrefix = request.getParameter("keyPrefix");
         final String serviceSubdomain = request.getParameter("serviceSubdomain");
-        final long maxFileSize = ParamUtils.getLongParameter(request, "maxFileSize", 104857600L);
-        final int putExpirationSeconds = ParamUtils.getIntParameter(request, "putExpirationSeconds", 300);
-        final int getExpirationSeconds = ParamUtils.getIntParameter(request, "getExpirationSeconds", 604800);
+        final long maxFileSize = ParamUtils.getLongParameter(request, "maxFileSize",
+            S3FileUploadPlugin.MAX_FILE_SIZE.getDefaultValue());
+        final int putExpirationSeconds = ParamUtils.getIntParameter(request, "putExpirationSeconds",
+            S3FileUploadPlugin.PUT_EXPIRATION_SECONDS.getDefaultValue());
+        final int getExpirationSeconds = ParamUtils.getIntParameter(request, "getExpirationSeconds",
+            S3FileUploadPlugin.GET_EXPIRATION_SECONDS.getDefaultValue());
 
         final S3UploadConfiguration candidate = new S3UploadConfiguration(
             bucket, region, endpoint, pathStyleAccess, keyPrefix, serviceSubdomain, maxFileSize,
@@ -35,15 +38,7 @@
         errors.addAll(candidate.validationErrors());
 
         if (errors.isEmpty()) {
-            S3FileUploadPlugin.BUCKET.setValue(bucket);
-            S3FileUploadPlugin.REGION.setValue(region);
-            S3FileUploadPlugin.ENDPOINT.setValue(endpoint);
-            S3FileUploadPlugin.PATH_STYLE_ACCESS.setValue(pathStyleAccess);
-            S3FileUploadPlugin.KEY_PREFIX.setValue(keyPrefix);
-            S3FileUploadPlugin.SERVICE_SUBDOMAIN.setValue(serviceSubdomain);
-            S3FileUploadPlugin.MAX_FILE_SIZE.setValue(maxFileSize);
-            S3FileUploadPlugin.PUT_EXPIRATION_SECONDS.setValue(putExpirationSeconds);
-            S3FileUploadPlugin.GET_EXPIRATION_SECONDS.setValue(getExpirationSeconds);
+            plugin.applyConfiguration(candidate);
             webManager.logEvent("Changed S3 HTTP File Upload settings",
                 "bucket=" + bucket + ", region=" + region + ", endpoint=" + endpoint
                     + ", pathStyleAccess=" + pathStyleAccess + ", keyPrefix=" + keyPrefix
@@ -101,17 +96,17 @@
 
     <admin:contentBox title="S3">
         <table>
-            <tr><td><label for="bucket">Bucket</label></td><td><input id="bucket" name="bucket" size="50" maxlength="255" value="${admin:escapeHTMLTags(bucket)}" required /></td></tr>
-            <tr><td><label for="region">Region</label></td><td><input id="region" name="region" size="30" maxlength="100" value="${admin:escapeHTMLTags(region)}" required /></td></tr>
-            <tr><td><label for="endpoint">Endpoint override</label></td><td><input id="endpoint" name="endpoint" size="70" maxlength="500" value="${admin:escapeHTMLTags(endpoint)}" placeholder="https://s3.example.com" /></td></tr>
+            <tr><td><label for="bucket">Bucket</label></td><td><input id="bucket" name="bucket" size="50" maxlength="255" value="<c:out value='${bucket}'/>" required /></td></tr>
+            <tr><td><label for="region">Region</label></td><td><input id="region" name="region" size="30" maxlength="100" value="<c:out value='${region}'/>" required /></td></tr>
+            <tr><td><label for="endpoint">Endpoint override</label></td><td><input id="endpoint" name="endpoint" size="70" maxlength="500" value="<c:out value='${endpoint}'/>" placeholder="https://s3.example.com" /></td></tr>
             <tr><td><label for="pathStyleAccess">Path-style access</label></td><td><input id="pathStyleAccess" name="pathStyleAccess" type="checkbox" <c:if test="${pathStyleAccess}">checked</c:if> /></td></tr>
-            <tr><td><label for="keyPrefix">Object key prefix</label></td><td><input id="keyPrefix" name="keyPrefix" size="50" maxlength="500" value="${admin:escapeHTMLTags(keyPrefix)}" /></td></tr>
+            <tr><td><label for="keyPrefix">Object key prefix</label></td><td><input id="keyPrefix" name="keyPrefix" size="50" maxlength="500" value="<c:out value='${keyPrefix}'/>" /></td></tr>
         </table>
     </admin:contentBox>
 
     <admin:contentBox title="XEP-0363 service">
         <table>
-            <tr><td><label for="serviceSubdomain">Service subdomain</label></td><td><input id="serviceSubdomain" name="serviceSubdomain" size="30" maxlength="100" value="${admin:escapeHTMLTags(serviceSubdomain)}" required /></td></tr>
+            <tr><td><label for="serviceSubdomain">Service subdomain</label></td><td><input id="serviceSubdomain" name="serviceSubdomain" size="30" maxlength="253" value="<c:out value='${serviceSubdomain}'/>" required /></td></tr>
             <tr><td><label for="maxFileSize">Maximum file size (bytes)</label></td><td><input id="maxFileSize" name="maxFileSize" type="number" min="-1" value="${maxFileSize}" required /></td></tr>
             <tr><td><label for="putExpirationSeconds">PUT URL lifetime (seconds)</label></td><td><input id="putExpirationSeconds" name="putExpirationSeconds" type="number" min="1" max="604800" value="${putExpirationSeconds}" required /></td></tr>
             <tr><td><label for="getExpirationSeconds">GET URL lifetime (seconds)</label></td><td><input id="getExpirationSeconds" name="getExpirationSeconds" type="number" min="1" max="604800" value="${getExpirationSeconds}" required /></td></tr>

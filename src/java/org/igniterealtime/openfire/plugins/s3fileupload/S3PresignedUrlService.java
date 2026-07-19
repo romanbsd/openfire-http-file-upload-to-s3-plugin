@@ -3,7 +3,6 @@
  */
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 
@@ -15,6 +14,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+import software.amazon.awssdk.utils.http.SdkHttpUtils;
 
 final class S3PresignedUrlService implements UploadSlotService {
     private final S3UploadConfiguration configuration;
@@ -100,22 +100,7 @@ final class S3PresignedUrlService implements UploadSlotService {
 
     private static String contentDisposition(String filename) {
         final String asciiFallback = filename.replaceAll("[^\\x20-\\x7E]", "_").replace("\\", "_").replace("\"", "_");
-        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''" + rfc3986(filename);
-    }
-
-    private static String rfc3986(String value) {
-        final StringBuilder result = new StringBuilder();
-        for (byte b : value.getBytes(StandardCharsets.UTF_8)) {
-            final int c = b & 0xff;
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-                || c == '-' || c == '.' || c == '_' || c == '~') {
-                result.append((char) c);
-            } else {
-                result.append('%');
-                result.append(Character.toUpperCase(Character.forDigit((c >>> 4) & 0xf, 16)));
-                result.append(Character.toUpperCase(Character.forDigit(c & 0xf, 16)));
-            }
-        }
-        return result.toString();
+        return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''"
+            + SdkHttpUtils.urlEncode(filename);
     }
 }

@@ -41,18 +41,23 @@ class S3UploadConfigurationTest {
     }
 
     @Test
-    void requiresServiceSubdomainToBeOneDnsLabel() {
-        for (String subdomain : new String[] {"upload.example", "upload-", "_upload", "a".repeat(64)}) {
+    void requiresServiceSubdomainToBeDnsLabels() {
+        for (String subdomain : new String[] {
+            "upload-", "_upload", "a".repeat(64), "upload..files", ".upload", "upload.",
+            ("a".repeat(63) + ".").repeat(4) + "toolong"}) {
             final S3UploadConfiguration configuration = new S3UploadConfiguration(
                 "files", "us-east-1", "", false, "files", subdomain,
                 1024, Duration.ofMinutes(5), Duration.ofHours(1));
 
             assertFalse(configuration.hasValidServiceSubdomain(), subdomain);
         }
-        final S3UploadConfiguration valid = new S3UploadConfiguration(
-            "files", "us-east-1", "", false, "files", "upload-2",
-            1024, Duration.ofMinutes(5), Duration.ofHours(1));
-        assertTrue(valid.hasValidServiceSubdomain());
+        for (String subdomain : new String[] {"upload-2", "upload.files", "a.b.c"}) {
+            final S3UploadConfiguration configuration = new S3UploadConfiguration(
+                "files", "us-east-1", "", false, "files", subdomain,
+                1024, Duration.ofMinutes(5), Duration.ofHours(1));
+
+            assertTrue(configuration.hasValidServiceSubdomain(), subdomain);
+        }
     }
 
     @Test
