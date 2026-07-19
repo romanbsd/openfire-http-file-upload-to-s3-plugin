@@ -37,20 +37,20 @@ The identity needs permission to sign requests for these operations:
 
 All settings are regular Openfire properties and are shared by cluster nodes.
 
-| Property | Default | Purpose |
-| --- | --- | --- |
-| `plugin.s3fileupload.bucket` | empty | Required S3 bucket |
-| `plugin.s3fileupload.region` | `us-east-1` | Signing region |
-| `plugin.s3fileupload.endpoint` | empty | Optional S3-compatible endpoint override |
-| `plugin.s3fileupload.pathStyleAccess` | `false` | Enable path-style requests for compatible storage |
-| `plugin.s3fileupload.useDefaultAwsCredentials` | `true` | Use the AWS SDK default credential chain instead of static credentials |
-| `plugin.s3fileupload.accessKey` | empty | Static access key when the default credential chain is disabled |
-| `plugin.s3fileupload.secretKey` | empty | Static secret key when the default credential chain is disabled |
-| `plugin.s3fileupload.keyPrefix` | `xmpp-uploads` | Prefix for generated randomized object keys |
-| `plugin.s3fileupload.serviceSubdomain` | `upload` | Component subdomain (`upload.example.org`) |
-| `plugin.s3fileupload.maxFileSize` | `104857600` | Maximum bytes; `-1` disables the limit |
-| `plugin.s3fileupload.putExpirationSeconds` | `300` | Presigned PUT lifetime |
-| `plugin.s3fileupload.getExpirationSeconds` | `604800` | Presigned GET lifetime (maximum seven days) |
+| Property                                       | Default        | Purpose                                                                |
+|------------------------------------------------|----------------|------------------------------------------------------------------------|
+| `plugin.s3fileupload.bucket`                   | empty          | Required S3 bucket                                                     |
+| `plugin.s3fileupload.region`                   | `us-east-1`    | Signing region                                                         |
+| `plugin.s3fileupload.endpoint`                 | empty          | Optional S3-compatible endpoint override                               |
+| `plugin.s3fileupload.pathStyleAccess`          | `false`        | Enable path-style requests for compatible storage                      |
+| `plugin.s3fileupload.useDefaultAwsCredentials` | `true`         | Use the AWS SDK default credential chain instead of static credentials |
+| `plugin.s3fileupload.accessKey`                | empty          | Static access key when the default credential chain is disabled        |
+| `plugin.s3fileupload.secretKey`                | empty          | Static secret key when the default credential chain is disabled        |
+| `plugin.s3fileupload.keyPrefix`                | `xmpp-uploads` | Prefix for generated randomized object keys                            |
+| `plugin.s3fileupload.serviceSubdomain`         | `upload`       | Component subdomain (`upload.example.org`)                             |
+| `plugin.s3fileupload.maxFileSize`              | `104857600`    | Maximum bytes; `-1` disables the limit                                 |
+| `plugin.s3fileupload.putExpirationSeconds`     | `300`          | Presigned PUT lifetime                                                 |
+| `plugin.s3fileupload.getExpirationSeconds`     | `604800`       | Presigned GET lifetime (maximum seven days)                            |
 
 The GET URL is presigned too, so links stop working after its configured lifetime. If messages must retain permanent download links, use a public/private CDN design with an authorization layer instead of this plugin's presigned-GET mode.
 
