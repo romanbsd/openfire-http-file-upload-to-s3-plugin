@@ -91,8 +91,7 @@ class S3PresignedUrlServiceTest {
             .endpointOverride(configuration.endpointUri())
             .region(Region.US_EAST_1)
             .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("access", "secret")))
-            .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true)
-                .checksumValidationEnabled(false).build())
+            .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
             .build();
         final S3ObjectKeyFactory keys = new S3ObjectKeyFactory("xmpp",
             () -> UUID.fromString("123e4567-e89b-12d3-a456-426614174000"));

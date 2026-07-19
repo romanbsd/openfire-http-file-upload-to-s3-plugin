@@ -17,10 +17,13 @@ final class S3UploadComponent extends AbstractComponent {
     static final String UPLOAD_NAMESPACE = "urn:xmpp:http:upload:0";
     private static final String DATA_FORMS_NAMESPACE = "jabber:x:data";
 
-    private final ReentrantReadWriteLock serviceLifecycleLock = new ReentrantReadWriteLock(true);
+    // Unfair mode suffices: readers still cannot barge past a queued writer, and the
+    // write load (admin reconfigures) is far too rare to starve.
+    private final ReentrantReadWriteLock serviceLifecycleLock = new ReentrantReadWriteLock();
     private final Function<S3UploadConfiguration, UploadSlotService> serviceFactory;
     private volatile S3UploadConfiguration configuration;
     private UploadSlotService slotService;
+    private boolean shutdown; // guarded by serviceLifecycleLock's write lock
 
     S3UploadComponent(S3UploadConfiguration configuration) {
         this(configuration, S3UploadComponent::createService);
@@ -34,6 +37,7 @@ final class S3UploadComponent extends AbstractComponent {
         S3UploadConfiguration configuration,
         Function<S3UploadConfiguration, UploadSlotService> serviceFactory
     ) {
+        super(4, 1000, true); // presigning is cheap local work; a modest pool absorbs bursts
         this.configuration = Objects.requireNonNull(configuration);
         this.serviceFactory = Objects.requireNonNull(serviceFactory);
         this.slotService = serviceFactory.apply(configuration);
@@ -169,11 +173,16 @@ final class S3UploadComponent extends AbstractComponent {
         final UploadSlotService replacement = serviceFactory.apply(newConfiguration);
         serviceLifecycleLock.writeLock().lock();
         try {
+            if (shutdown) {
+                // A racing shutdown already closed the current service; don't install (and leak) a new one.
+                closeQuietly(replacement);
+                return;
+            }
             final UploadSlotService previous = slotService;
             configuration = newConfiguration;
             slotService = replacement;
             if (previous != null && previous != replacement) {
-                previous.close();
+                closeQuietly(previous);
             }
         } finally {
             serviceLifecycleLock.writeLock().unlock();
@@ -184,12 +193,24 @@ final class S3UploadComponent extends AbstractComponent {
     public void preComponentShutdown() {
         serviceLifecycleLock.writeLock().lock();
         try {
+            shutdown = true;
             if (slotService != null) {
-                slotService.close();
+                closeQuietly(slotService);
                 slotService = null;
             }
         } finally {
             serviceLifecycleLock.writeLock().unlock();
+        }
+    }
+
+    private void closeQuietly(UploadSlotService service) {
+        if (service == null) {
+            return;
+        }
+        try {
+            service.close();
+        } catch (RuntimeException e) {
+            log.warn("Failed to close an S3 upload slot service.", e);
         }
     }
 

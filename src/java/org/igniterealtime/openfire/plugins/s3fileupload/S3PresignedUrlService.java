@@ -84,7 +84,6 @@ final class S3PresignedUrlService implements UploadSlotService {
             .credentialsProvider(credentialsProvider(configuration))
             .serviceConfiguration(S3Configuration.builder()
                 .pathStyleAccessEnabled(configuration.pathStyleAccess())
-                .checksumValidationEnabled(false)
                 .build());
         if (configuration.endpointUri() != null) {
             builder.endpointOverride(configuration.endpointUri());
@@ -94,7 +93,7 @@ final class S3PresignedUrlService implements UploadSlotService {
 
     private static AwsCredentialsProvider credentialsProvider(S3UploadConfiguration configuration) {
         if (configuration.useDefaultAwsCredentials()) {
-            return DefaultCredentialsProvider.create();
+            return DefaultCredentialsProvider.builder().build();
         }
         return StaticCredentialsProvider.create(
             AwsBasicCredentials.create(configuration.accessKey(), configuration.secretKey()));

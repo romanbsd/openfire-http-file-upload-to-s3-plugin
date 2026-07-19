@@ -160,6 +160,42 @@ class S3UploadComponentTest {
     }
 
     @Test
+    void reconfigureAfterShutdownClosesReplacementAndStaysDown() {
+        final FakeSlotService first = new FakeSlotService();
+        final FakeSlotService second = new FakeSlotService();
+        final List<FakeSlotService> services = List.of(first, second);
+        final AtomicInteger nextService = new AtomicInteger();
+        final S3UploadComponent component = new S3UploadComponent(
+            configuration(10), ignored -> services.get(nextService.getAndIncrement()));
+
+        component.preComponentShutdown();
+        component.reconfigure(configuration(20));
+
+        assertTrue(first.closed);
+        assertTrue(second.closed);
+        assertError(component.handleSlotRequest(request("late.txt", "1", null)),
+            PacketError.Condition.service_unavailable);
+    }
+
+    @Test
+    void reconfigureSurvivesAFailingCloseOfThePreviousService() {
+        final FakeSlotService first = new FakeSlotService();
+        first.closeFailure = new IllegalStateException("close failed");
+        final FakeSlotService second = new FakeSlotService();
+        final List<FakeSlotService> services = List.of(first, second);
+        final AtomicInteger nextService = new AtomicInteger();
+        final S3UploadComponent component = new S3UploadComponent(
+            configuration(10), ignored -> services.get(nextService.getAndIncrement()));
+
+        component.reconfigure(configuration(20));
+        final IQ response = component.handleSlotRequest(request("still-works.txt", "1", null));
+
+        assertTrue(first.closed);
+        assertEquals(IQ.Type.result, response.getType());
+        assertEquals("still-works.txt", second.lastRequest.filename());
+    }
+
+    @Test
     void reconfigureWaitsForInFlightPresignBeforeClosingService() throws Exception {
         final CountDownLatch signingStarted = new CountDownLatch(1);
         final CountDownLatch releaseSigning = new CountDownLatch(1);
@@ -236,6 +272,7 @@ class S3UploadComponentTest {
     private static final class FakeSlotService implements UploadSlotService {
         private UploadRequest lastRequest;
         private RuntimeException failure;
+        private RuntimeException closeFailure;
         private boolean closed;
 
         @Override
@@ -250,6 +287,9 @@ class S3UploadComponentTest {
         @Override
         public void close() {
             closed = true;
+            if (closeFailure != null) {
+                throw closeFailure;
+            }
         }
     }
 

@@ -18,6 +18,7 @@
     final S3UploadConfiguration existingConfiguration = plugin.configuration();
     final List<String> errors = new ArrayList<>();
     boolean saved = false;
+    boolean saveFailed = false;
 
     if ("POST".equals(request.getMethod()) && request.getParameter("update") != null) {
         final String bucket = request.getParameter("bucket");
@@ -48,21 +49,28 @@
         errors.addAll(candidate.validationErrors());
 
         if (errors.isEmpty()) {
-            plugin.applyConfiguration(candidate);
-            webManager.logEvent("Changed S3 HTTP File Upload settings",
-                "bucket=" + bucket + ", region=" + region + ", endpoint=" + endpoint
-                    + ", pathStyleAccess=" + pathStyleAccess + ", keyPrefix=" + keyPrefix
-                    + ", useDefaultAwsCredentials=" + useDefaultAwsCredentials
-                    + ", serviceSubdomain=" + serviceSubdomain + ", maxFileSize=" + maxFileSize
-                    + ", putExpirationSeconds=" + putExpirationSeconds
-                    + ", getExpirationSeconds=" + getExpirationSeconds);
-            saved = true;
+            if (plugin.applyConfiguration(candidate)) {
+                webManager.logEvent("Changed S3 HTTP File Upload settings",
+                    "bucket=" + candidate.bucket() + ", region=" + candidate.region()
+                        + ", endpoint=" + candidate.endpoint()
+                        + ", pathStyleAccess=" + candidate.pathStyleAccess()
+                        + ", keyPrefix=" + candidate.keyPrefix()
+                        + ", useDefaultAwsCredentials=" + candidate.useDefaultAwsCredentials()
+                        + ", serviceSubdomain=" + candidate.serviceSubdomain()
+                        + ", maxFileSize=" + candidate.maxFileSize()
+                        + ", putExpirationSeconds=" + putExpirationSeconds
+                        + ", getExpirationSeconds=" + getExpirationSeconds);
+                saved = true;
+            } else {
+                saveFailed = true;
+            }
         }
     }
 
     final S3UploadConfiguration configuration = plugin.configuration();
     request.setAttribute("errors", errors);
     request.setAttribute("saved", saved);
+    request.setAttribute("saveFailed", saveFailed);
     request.setAttribute("ready", configuration.isReady());
     request.setAttribute("bucket", configuration.bucket());
     request.setAttribute("region", configuration.region());
@@ -78,6 +86,8 @@
     request.setAttribute("getExpirationSeconds", configuration.getExpiration().getSeconds());
     request.setAttribute("serviceDomain", configuration.serviceSubdomain() + "."
         + XMPPServer.getInstance().getServerInfo().getXMPPDomain());
+    request.setAttribute("componentRegistered",
+        configuration.serviceSubdomain().equals(plugin.registeredSubdomain()));
 %>
 <html>
 <head>
@@ -90,6 +100,9 @@
 <c:if test="${saved}">
     <admin:infobox type="success"><fmt:message key="s3fileupload.settings.saved" /></admin:infobox>
 </c:if>
+<c:if test="${saveFailed}">
+    <admin:infobox type="error"><fmt:message key="s3fileupload.settings.saveFailed" /></admin:infobox>
+</c:if>
 <c:if test="${not empty errors}">
     <admin:infobox type="error">
         <ul>
@@ -99,6 +112,9 @@
 </c:if>
 <c:if test="${not ready}">
     <admin:infobox type="warning"><fmt:message key="s3fileupload.settings.notReady" /></admin:infobox>
+</c:if>
+<c:if test="${ready and not componentRegistered}">
+    <admin:infobox type="error"><fmt:message key="s3fileupload.settings.notRegistered" /></admin:infobox>
 </c:if>
 
 <p><fmt:message key="s3fileupload.settings.description" /></p>

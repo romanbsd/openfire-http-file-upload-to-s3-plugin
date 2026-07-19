@@ -44,6 +44,7 @@
                 <configuration>
                     <release>17</release>
                     <fork>true</fork>
+                    <showDeprecation>true</showDeprecation>
                     <compilerArgs>
                         <arg>--should-stop=ifError=FLOW</arg>
                         <arg>-XDcompilePolicy=simple</arg>
