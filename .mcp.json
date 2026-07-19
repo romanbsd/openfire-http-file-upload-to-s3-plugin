@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "maven-indexer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "maven-indexer-mcp@latest"
+      ]
+    }
+  }
+}

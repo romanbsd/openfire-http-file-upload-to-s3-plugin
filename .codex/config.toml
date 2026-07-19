@@ -1,0 +1,3 @@
+[mcp_servers.maven-indexer]
+command = "npx"
+args = ["-y", "maven-indexer-mcp@latest"]
