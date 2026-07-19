@@ -39,4 +39,32 @@ class S3UploadConfigurationTest {
         assertFalse(configuration.isReady());
         assertEquals(6, configuration.validationErrors().size());
     }
+
+    @Test
+    void requiresServiceSubdomainToBeOneDnsLabel() {
+        for (String subdomain : new String[] {"upload.example", "upload-", "_upload", "a".repeat(64)}) {
+            final S3UploadConfiguration configuration = new S3UploadConfiguration(
+                "files", "us-east-1", "", false, "files", subdomain,
+                1024, Duration.ofMinutes(5), Duration.ofHours(1));
+
+            assertFalse(configuration.hasValidServiceSubdomain(), subdomain);
+        }
+        final S3UploadConfiguration valid = new S3UploadConfiguration(
+            "files", "us-east-1", "", false, "files", "upload-2",
+            1024, Duration.ofMinutes(5), Duration.ofHours(1));
+        assertTrue(valid.hasValidServiceSubdomain());
+    }
+
+    @Test
+    void rejectsMalformedAndRelativeEndpoints() {
+        final S3UploadConfiguration malformed = new S3UploadConfiguration(
+            "files", "us-east-1", "https://bad host", false, "files", "upload",
+            1024, Duration.ofMinutes(5), Duration.ofHours(1));
+        final S3UploadConfiguration relative = new S3UploadConfiguration(
+            "files", "us-east-1", "/s3", false, "files", "upload",
+            1024, Duration.ofMinutes(5), Duration.ofHours(1));
+
+        assertFalse(malformed.isReady());
+        assertFalse(relative.isReady());
+    }
 }

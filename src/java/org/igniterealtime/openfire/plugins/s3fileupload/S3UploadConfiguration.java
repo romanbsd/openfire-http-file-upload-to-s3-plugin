@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /** Immutable, validated runtime configuration for the S3 upload service. */
 public record S3UploadConfiguration(
@@ -24,6 +25,8 @@ public record S3UploadConfiguration(
 ) {
     static final int MAX_FILENAME_BYTES = 255;
     static final Duration MAX_PRESIGN_DURATION = Duration.ofDays(7);
+    private static final Pattern SUBDOMAIN =
+        Pattern.compile("[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?");
 
     public S3UploadConfiguration {
         bucket = trim(bucket);
@@ -55,18 +58,7 @@ public record S3UploadConfiguration(
         }
         validateDuration("PUT URL expiration", putExpiration, errors);
         validateDuration("GET URL expiration", getExpiration, errors);
-        if (!endpoint.isEmpty()) {
-            try {
-                final URI uri = new URI(endpoint);
-                if (!uri.isAbsolute() || uri.getHost() == null) {
-                    errors.add("S3 endpoint must be an absolute HTTP(S) URL");
-                } else if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
-                    errors.add("S3 endpoint must use HTTP or HTTPS");
-                }
-            } catch (URISyntaxException e) {
-                errors.add("S3 endpoint is not a valid URI");
-            }
-        }
+        validateEndpoint(errors);
         return List.copyOf(errors);
     }
 
@@ -75,7 +67,23 @@ public record S3UploadConfiguration(
     }
 
     boolean hasValidServiceSubdomain() {
-        return !serviceSubdomain.isEmpty() && serviceSubdomain.matches("[A-Za-z0-9][A-Za-z0-9.-]*");
+        return SUBDOMAIN.matcher(serviceSubdomain).matches();
+    }
+
+    private void validateEndpoint(List<String> errors) {
+        if (endpoint.isEmpty()) {
+            return;
+        }
+        try {
+            final URI uri = new URI(endpoint);
+            if (!uri.isAbsolute() || uri.getHost() == null) {
+                errors.add("S3 endpoint must be an absolute HTTP(S) URL");
+            } else if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
+                errors.add("S3 endpoint must use HTTP or HTTPS");
+            }
+        } catch (URISyntaxException e) {
+            errors.add("S3 endpoint is not a valid URI");
+        }
     }
 
     private static void validateDuration(String name, Duration duration, List<String> errors) {

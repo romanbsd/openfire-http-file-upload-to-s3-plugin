@@ -16,7 +16,7 @@ final class S3ObjectKeyFactory {
     }
 
     S3ObjectKeyFactory(String prefix, Supplier<UUID> uuidSupplier) {
-        this.prefix = prefix;
+        this.prefix = Objects.requireNonNull(prefix);
         this.uuidSupplier = Objects.requireNonNull(uuidSupplier);
     }
 
@@ -26,6 +26,6 @@ final class S3ObjectKeyFactory {
             .replace('/', '_')
             .replace("\u0000", "_");
         final String objectName = uuidSupplier.get() + "/" + safeFilename;
-        return prefix == null || prefix.isBlank() ? objectName : prefix + "/" + objectName;
+        return prefix.isEmpty() ? objectName : prefix + "/" + objectName;
     }
 }

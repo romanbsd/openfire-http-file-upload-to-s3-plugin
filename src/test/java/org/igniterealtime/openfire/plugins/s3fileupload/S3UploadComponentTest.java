@@ -2,8 +2,11 @@ package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.dom4j.Element;
 import org.junit.jupiter.api.Test;
@@ -12,12 +15,12 @@ import org.xmpp.packet.PacketError;
 
 class S3UploadComponentTest {
     @Test
-    void returnsXep0363Slot() {
+    void routesRequestAndReturnsXep0363Slot() throws Exception {
         final FakeSlotService service = new FakeSlotService();
         final S3UploadComponent component = new S3UploadComponent(configuration(1024), service);
         final IQ request = request("hello world.jpg", "42", "image/jpeg");
 
-        final IQ response = component.handleSlotRequest(request);
+        final IQ response = component.handleIQGet(request);
 
         assertEquals(IQ.Type.result, response.getType());
         assertEquals(S3UploadComponent.UPLOAD_NAMESPACE, response.getChildElement().getNamespaceURI());
@@ -59,17 +62,100 @@ class S3UploadComponentTest {
         assertEquals("4096", form.elements("field").get(1).elementText("value"));
     }
 
+    @Test
+    void omitsMaximumFileSizeWhenUploadsAreUnlimited() {
+        final S3UploadComponent component = new S3UploadComponent(configuration(-1), new FakeSlotService());
+
+        final Element form = component.handleDiscoInfo(discoRequest()).getChildElement().element("x");
+
+        assertEquals(1, form.elements("field").size());
+    }
+
+    @Test
+    void rejectsUnauthenticatedAndMalformedRequests() {
+        final S3UploadComponent component = new S3UploadComponent(configuration(1024), new FakeSlotService());
+        final IQ unauthenticated = request("file.txt", "1", null);
+        unauthenticated.setFrom((String) null);
+
+        assertError(component.handleSlotRequest(unauthenticated), PacketError.Condition.not_authorized);
+        assertError(component.handleSlotRequest(request("", "1", null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("bad\nname", "1", null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("é".repeat(128), "1", null)),
+            PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("file.txt", null, null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("file.txt", "0", null)), PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("file.txt", "not-a-number", null)),
+            PacketError.Condition.bad_request);
+        assertError(component.handleSlotRequest(request("file.txt", "1", "text/plain\ninvalid")),
+            PacketError.Condition.bad_request);
+    }
+
+    @Test
+    void reportsUnavailableConfigurationAndSlotFailures() {
+        final S3UploadConfiguration invalid = new S3UploadConfiguration(
+            "", "us-east-1", "", false, "", "upload", 1024,
+            Duration.ofMinutes(5), Duration.ofHours(1));
+        final S3UploadComponent unavailable = new S3UploadComponent(invalid);
+        final FakeSlotService failingService = new FakeSlotService();
+        failingService.failure = new IllegalStateException("signing failed");
+        final S3UploadComponent failing = new S3UploadComponent(configuration(1024), failingService);
+
+        assertError(unavailable.handleSlotRequest(request("file.txt", "1", null)),
+            PacketError.Condition.service_unavailable);
+        assertError(failing.handleSlotRequest(request("file.txt", "1", null)),
+            PacketError.Condition.internal_server_error);
+    }
+
+    @Test
+    void reconfigureClosesPreviousServiceAndUsesReplacement() {
+        final FakeSlotService first = new FakeSlotService();
+        final FakeSlotService second = new FakeSlotService();
+        final List<FakeSlotService> services = List.of(first, second);
+        final AtomicInteger nextService = new AtomicInteger();
+        final S3UploadComponent component = new S3UploadComponent(
+            configuration(10), ignored -> services.get(nextService.getAndIncrement()));
+
+        component.handleSlotRequest(request("first.txt", "1", null));
+        component.reconfigure(configuration(20));
+        component.handleSlotRequest(request("second.txt", "2", null));
+
+        assertTrue(first.closed);
+        assertEquals("first.txt", first.lastRequest.filename());
+        assertEquals("second.txt", second.lastRequest.filename());
+        component.preComponentShutdown();
+        assertTrue(second.closed);
+        assertError(component.handleSlotRequest(request("after-shutdown.txt", "1", null)),
+            PacketError.Condition.service_unavailable);
+    }
+
     private static IQ request(String filename, String size, String contentType) {
         final IQ iq = new IQ(IQ.Type.get, "slot-1");
         iq.setFrom("romeo@example.test/garden");
         iq.setTo("upload.example.test");
         final Element request = iq.setChildElement("request", S3UploadComponent.UPLOAD_NAMESPACE);
-        request.addAttribute("filename", filename);
-        request.addAttribute("size", size);
+        if (filename != null) {
+            request.addAttribute("filename", filename);
+        }
+        if (size != null) {
+            request.addAttribute("size", size);
+        }
         if (contentType != null) {
             request.addAttribute("content-type", contentType);
         }
         return iq;
+    }
+
+    private static IQ discoRequest() {
+        final IQ request = new IQ(IQ.Type.get);
+        request.setFrom("romeo@example.test/garden");
+        request.setTo("upload.example.test");
+        request.setChildElement("query", S3UploadComponent.NAMESPACE_DISCO_INFO);
+        return request;
+    }
+
+    private static void assertError(IQ response, PacketError.Condition condition) {
+        assertEquals(IQ.Type.error, response.getType());
+        assertEquals(condition, response.getError().getCondition());
     }
 
     private static S3UploadConfiguration configuration(long maxSize) {
@@ -79,15 +165,21 @@ class S3UploadComponentTest {
 
     private static final class FakeSlotService implements UploadSlotService {
         private UploadRequest lastRequest;
+        private RuntimeException failure;
+        private boolean closed;
 
         @Override
         public UploadSlot createSlot(UploadRequest request) {
+            if (failure != null) {
+                throw failure;
+            }
             lastRequest = request;
             return new UploadSlot("https://s3.test/put?a=1&b=2", "https://s3.test/get?a=1&b=2");
         }
 
         @Override
         public void close() {
+            closed = true;
         }
     }
 }

@@ -5,6 +5,7 @@ package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.function.Function;
 
 import org.dom4j.Element;
 import org.xmpp.component.AbstractComponent;
@@ -16,17 +17,26 @@ final class S3UploadComponent extends AbstractComponent {
     private static final String DATA_FORMS_NAMESPACE = "jabber:x:data";
 
     private final Object serviceLock = new Object();
+    private final Function<S3UploadConfiguration, UploadSlotService> serviceFactory;
     private volatile S3UploadConfiguration configuration;
     private UploadSlotService slotService;
 
     S3UploadComponent(S3UploadConfiguration configuration) {
-        this(configuration, null);
+        this(configuration, S3UploadComponent::createService);
     }
 
     S3UploadComponent(S3UploadConfiguration configuration, UploadSlotService slotService) {
+        this(configuration, ignored -> slotService);
+    }
+
+    S3UploadComponent(
+        S3UploadConfiguration configuration,
+        Function<S3UploadConfiguration, UploadSlotService> serviceFactory
+    ) {
         super(1, 4, true);
         this.configuration = Objects.requireNonNull(configuration);
-        this.slotService = slotService != null ? slotService : createService(configuration);
+        this.serviceFactory = Objects.requireNonNull(serviceFactory);
+        this.slotService = serviceFactory.apply(configuration);
     }
 
     @Override
@@ -90,7 +100,12 @@ final class S3UploadComponent extends AbstractComponent {
     }
 
     IQ handleSlotRequest(IQ iq) {
-        final S3UploadConfiguration current = configuration;
+        synchronized (serviceLock) {
+            return handleSlotRequest(iq, configuration, slotService);
+        }
+    }
+
+    private IQ handleSlotRequest(IQ iq, S3UploadConfiguration current, UploadSlotService service) {
         if (!current.isReady()) {
             return error(iq, PacketError.Condition.service_unavailable, PacketError.Type.cancel,
                 "S3 upload is not configured");
@@ -102,22 +117,14 @@ final class S3UploadComponent extends AbstractComponent {
 
         final Element request = iq.getChildElement();
         final String filename = request.attributeValue("filename");
-        if (filename == null || filename.isBlank()
-            || filename.getBytes(StandardCharsets.UTF_8).length > S3UploadConfiguration.MAX_FILENAME_BYTES
-            || containsControlCharacter(filename)) {
-            return error(iq, PacketError.Condition.bad_request, PacketError.Type.modify,
+        if (isInvalidFilename(filename)) {
+            return badRequest(iq,
                 "filename must contain 1 to 255 UTF-8 bytes and no control characters");
         }
 
-        final long size;
-        try {
-            size = Long.parseLong(request.attributeValue("size"));
-            if (size <= 0) {
-                throw new NumberFormatException("not positive");
-            }
-        } catch (NumberFormatException | NullPointerException e) {
-            return error(iq, PacketError.Condition.bad_request, PacketError.Type.modify,
-                "size must be a positive integer");
+        final long size = parsePositiveLong(request.attributeValue("size"));
+        if (size < 0) {
+            return badRequest(iq, "size must be a positive integer");
         }
 
         if (current.maxFileSize() > -1 && size > current.maxFileSize()) {
@@ -130,19 +137,16 @@ final class S3UploadComponent extends AbstractComponent {
         }
 
         final String contentType = request.attributeValue("content-type");
-        if (contentType != null && (contentType.length() > 255 || containsControlCharacter(contentType))) {
-            return error(iq, PacketError.Condition.bad_request, PacketError.Type.modify, "content-type is invalid");
+        if (contentType != null && isInvalidContentType(contentType)) {
+            return badRequest(iq, "content-type is invalid");
         }
 
         try {
-            final UploadSlot slot;
-            synchronized (serviceLock) {
-                if (slotService == null) {
-                    return error(iq, PacketError.Condition.service_unavailable, PacketError.Type.cancel,
-                        "S3 upload is not available");
-                }
-                slot = slotService.createSlot(new UploadRequest(filename, size, contentType));
+            if (service == null) {
+                return error(iq, PacketError.Condition.service_unavailable, PacketError.Type.cancel,
+                    "S3 upload is not available");
             }
+            final UploadSlot slot = service.createSlot(new UploadRequest(filename, size, contentType));
             final IQ response = IQ.createResultIQ(iq);
             final Element slotElement = response.setChildElement("slot", UPLOAD_NAMESPACE);
             slotElement.addElement("put").addAttribute("url", slot.putUrl());
@@ -157,7 +161,7 @@ final class S3UploadComponent extends AbstractComponent {
 
     void reconfigure(S3UploadConfiguration newConfiguration) {
         Objects.requireNonNull(newConfiguration);
-        final UploadSlotService replacement = createService(newConfiguration);
+        final UploadSlotService replacement = serviceFactory.apply(newConfiguration);
         synchronized (serviceLock) {
             final UploadSlotService previous = slotService;
             configuration = newConfiguration;
@@ -190,6 +194,29 @@ final class S3UploadComponent extends AbstractComponent {
         }
         response.setError(new PacketError(condition, type, text));
         return response;
+    }
+
+    private static IQ badRequest(IQ request, String text) {
+        return error(request, PacketError.Condition.bad_request, PacketError.Type.modify, text);
+    }
+
+    private static boolean isInvalidFilename(String filename) {
+        return filename == null || filename.isBlank()
+            || filename.getBytes(StandardCharsets.UTF_8).length > S3UploadConfiguration.MAX_FILENAME_BYTES
+            || containsControlCharacter(filename);
+    }
+
+    private static boolean isInvalidContentType(String contentType) {
+        return contentType.length() > 255 || containsControlCharacter(contentType);
+    }
+
+    private static long parsePositiveLong(String value) {
+        try {
+            final long parsed = Long.parseLong(value);
+            return parsed > 0 ? parsed : -1;
+        } catch (NumberFormatException | NullPointerException e) {
+            return -1;
+        }
     }
 
     private static boolean containsControlCharacter(String value) {

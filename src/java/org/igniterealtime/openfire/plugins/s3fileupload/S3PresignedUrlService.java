@@ -4,6 +4,8 @@
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Objects;
 
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -20,7 +22,8 @@ final class S3PresignedUrlService implements UploadSlotService {
     private final S3Presigner presigner;
 
     S3PresignedUrlService(S3UploadConfiguration configuration) {
-        this(configuration, createPresigner(configuration), new S3ObjectKeyFactory(configuration.keyPrefix()));
+        this(configuration, createPresigner(requireValid(configuration)),
+            new S3ObjectKeyFactory(configuration.keyPrefix()));
     }
 
     S3PresignedUrlService(
@@ -28,23 +31,21 @@ final class S3PresignedUrlService implements UploadSlotService {
         S3Presigner presigner,
         S3ObjectKeyFactory keyFactory
     ) {
-        if (!configuration.isReady()) {
-            throw new IllegalArgumentException(String.join("; ", configuration.validationErrors()));
-        }
-        this.configuration = configuration;
-        this.presigner = presigner;
-        this.keyFactory = keyFactory;
+        this.configuration = requireValid(configuration);
+        this.presigner = Objects.requireNonNull(presigner);
+        this.keyFactory = Objects.requireNonNull(keyFactory);
     }
 
     @Override
     public UploadSlot createSlot(UploadRequest request) {
         final String key = keyFactory.create(request.filename());
+        final boolean hasContentType = request.contentType() != null && !request.contentType().isBlank();
 
         final PutObjectRequest.Builder putObject = PutObjectRequest.builder()
             .bucket(configuration.bucket())
             .key(key)
             .contentLength(request.size());
-        if (request.contentType() != null && !request.contentType().isBlank()) {
+        if (hasContentType) {
             putObject.contentType(request.contentType());
         }
 
@@ -57,7 +58,7 @@ final class S3PresignedUrlService implements UploadSlotService {
             .bucket(configuration.bucket())
             .key(key)
             .responseContentDisposition(contentDisposition(request.filename()));
-        if (request.contentType() != null && !request.contentType().isBlank()) {
+        if (hasContentType) {
             getObject.responseContentType(request.contentType());
         }
 
@@ -86,6 +87,15 @@ final class S3PresignedUrlService implements UploadSlotService {
             builder.endpointOverride(configuration.endpointUri());
         }
         return builder.build();
+    }
+
+    private static S3UploadConfiguration requireValid(S3UploadConfiguration configuration) {
+        Objects.requireNonNull(configuration);
+        final List<String> errors = configuration.validationErrors();
+        if (!errors.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", errors));
+        }
+        return configuration;
     }
 
     private static String contentDisposition(String filename) {
