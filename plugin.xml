@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+    <class>org.igniterealtime.openfire.plugins.s3fileupload.S3FileUploadPlugin</class>
+    <name>S3 HTTP File Upload</name>
+    <description>Provides XEP-0363 HTTP File Upload using direct-to-S3 presigned URLs.</description>
+    <author>Openfire Community</author>
+    <version>${project.version}</version>
+    <date>2026-07-19</date>
+    <minServerVersion>5.1.1</minServerVersion>
+    <licenseType>apache</licenseType>
+    <csrfProtectionEnabled>true</csrfProtectionEnabled>
+
+    <adminconsole>
+        <tab id="tab-server">
+            <sidebar id="sidebar-server-settings">
+                <item id="s3fileupload-settings"
+                      name="${s3fileupload.sidebar.settings}"
+                      url="s3fileupload-settings.jsp"
+                      description="${s3fileupload.sidebar.settings.desc}" />
+            </sidebar>
+        </tab>
+    </adminconsole>
+</plugin>

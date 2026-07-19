@@ -1,0 +1,124 @@
+<%@ page contentType="text/html; charset=UTF-8" %>
+<%@ page errorPage="/error.jsp" %>
+<%@ page import="java.time.Duration" %>
+<%@ page import="java.util.ArrayList" %>
+<%@ page import="java.util.List" %>
+<%@ page import="org.igniterealtime.openfire.plugins.s3fileupload.S3FileUploadPlugin" %>
+<%@ page import="org.igniterealtime.openfire.plugins.s3fileupload.S3UploadConfiguration" %>
+<%@ page import="org.jivesoftware.openfire.XMPPServer" %>
+<%@ page import="org.jivesoftware.util.ParamUtils" %>
+<%@ taglib uri="http://java.sun.com/jsp/jstl/core" prefix="c" %>
+<%@ taglib uri="http://java.sun.com/jsp/jstl/fmt" prefix="fmt" %>
+<%@ taglib uri="admin" prefix="admin" %>
+<jsp:useBean id="webManager" class="org.jivesoftware.util.WebManager" />
+<% webManager.init(request, response, session, application, out); %>
+<%
+    final S3FileUploadPlugin plugin = (S3FileUploadPlugin) XMPPServer.getInstance()
+        .getPluginManager().getPluginByName("S3 HTTP File Upload").orElseThrow();
+    final List<String> errors = new ArrayList<>();
+    boolean saved = false;
+
+    if ("POST".equals(request.getMethod()) && request.getParameter("update") != null) {
+        final String bucket = request.getParameter("bucket");
+        final String region = request.getParameter("region");
+        final String endpoint = request.getParameter("endpoint");
+        final boolean pathStyleAccess = ParamUtils.getBooleanParameter(request, "pathStyleAccess");
+        final String keyPrefix = request.getParameter("keyPrefix");
+        final String serviceSubdomain = request.getParameter("serviceSubdomain");
+        final long maxFileSize = ParamUtils.getLongParameter(request, "maxFileSize", 104857600L);
+        final int putExpirationSeconds = ParamUtils.getIntParameter(request, "putExpirationSeconds", 300);
+        final int getExpirationSeconds = ParamUtils.getIntParameter(request, "getExpirationSeconds", 604800);
+
+        final S3UploadConfiguration candidate = new S3UploadConfiguration(
+            bucket, region, endpoint, pathStyleAccess, keyPrefix, serviceSubdomain, maxFileSize,
+            Duration.ofSeconds(putExpirationSeconds), Duration.ofSeconds(getExpirationSeconds));
+        errors.addAll(candidate.validationErrors());
+
+        if (errors.isEmpty()) {
+            S3FileUploadPlugin.BUCKET.setValue(bucket);
+            S3FileUploadPlugin.REGION.setValue(region);
+            S3FileUploadPlugin.ENDPOINT.setValue(endpoint);
+            S3FileUploadPlugin.PATH_STYLE_ACCESS.setValue(pathStyleAccess);
+            S3FileUploadPlugin.KEY_PREFIX.setValue(keyPrefix);
+            S3FileUploadPlugin.SERVICE_SUBDOMAIN.setValue(serviceSubdomain);
+            S3FileUploadPlugin.MAX_FILE_SIZE.setValue(maxFileSize);
+            S3FileUploadPlugin.PUT_EXPIRATION_SECONDS.setValue(putExpirationSeconds);
+            S3FileUploadPlugin.GET_EXPIRATION_SECONDS.setValue(getExpirationSeconds);
+            webManager.logEvent("Changed S3 HTTP File Upload settings",
+                "bucket=" + bucket + ", region=" + region + ", endpoint=" + endpoint
+                    + ", pathStyleAccess=" + pathStyleAccess + ", keyPrefix=" + keyPrefix
+                    + ", serviceSubdomain=" + serviceSubdomain + ", maxFileSize=" + maxFileSize
+                    + ", putExpirationSeconds=" + putExpirationSeconds
+                    + ", getExpirationSeconds=" + getExpirationSeconds);
+            saved = true;
+        }
+    }
+
+    final S3UploadConfiguration configuration = plugin.configuration();
+    request.setAttribute("errors", errors);
+    request.setAttribute("saved", saved);
+    request.setAttribute("ready", configuration.isReady());
+    request.setAttribute("bucket", configuration.bucket());
+    request.setAttribute("region", configuration.region());
+    request.setAttribute("endpoint", configuration.endpoint());
+    request.setAttribute("pathStyleAccess", configuration.pathStyleAccess());
+    request.setAttribute("keyPrefix", configuration.keyPrefix());
+    request.setAttribute("serviceSubdomain", configuration.serviceSubdomain());
+    request.setAttribute("maxFileSize", configuration.maxFileSize());
+    request.setAttribute("putExpirationSeconds", configuration.putExpiration().getSeconds());
+    request.setAttribute("getExpirationSeconds", configuration.getExpiration().getSeconds());
+    request.setAttribute("serviceDomain", configuration.serviceSubdomain() + "."
+        + XMPPServer.getInstance().getServerInfo().getXMPPDomain());
+%>
+<html>
+<head>
+    <title><fmt:message key="s3fileupload.settings.title" /></title>
+    <meta name="pageID" content="s3fileupload-settings" />
+</head>
+<body>
+<admin:FlashMessage />
+
+<c:if test="${saved}">
+    <admin:infobox type="success"><fmt:message key="s3fileupload.settings.saved" /></admin:infobox>
+</c:if>
+<c:if test="${not empty errors}">
+    <admin:infobox type="error">
+        <ul>
+            <c:forEach var="error" items="${errors}"><li><c:out value="${error}" /></li></c:forEach>
+        </ul>
+    </admin:infobox>
+</c:if>
+<c:if test="${not ready}">
+    <admin:infobox type="warning"><fmt:message key="s3fileupload.settings.notReady" /></admin:infobox>
+</c:if>
+
+<p><fmt:message key="s3fileupload.settings.description" /></p>
+<p><fmt:message key="s3fileupload.settings.credentials" /></p>
+<p><fmt:message key="s3fileupload.settings.serviceDomain"><fmt:param value="${serviceDomain}" /></fmt:message></p>
+
+<form action="s3fileupload-settings.jsp" method="post">
+    <input type="hidden" name="csrf" value="<c:out value='${csrf}'/>" />
+
+    <admin:contentBox title="S3">
+        <table>
+            <tr><td><label for="bucket">Bucket</label></td><td><input id="bucket" name="bucket" size="50" maxlength="255" value="${admin:escapeHTMLTags(bucket)}" required /></td></tr>
+            <tr><td><label for="region">Region</label></td><td><input id="region" name="region" size="30" maxlength="100" value="${admin:escapeHTMLTags(region)}" required /></td></tr>
+            <tr><td><label for="endpoint">Endpoint override</label></td><td><input id="endpoint" name="endpoint" size="70" maxlength="500" value="${admin:escapeHTMLTags(endpoint)}" placeholder="https://s3.example.com" /></td></tr>
+            <tr><td><label for="pathStyleAccess">Path-style access</label></td><td><input id="pathStyleAccess" name="pathStyleAccess" type="checkbox" <c:if test="${pathStyleAccess}">checked</c:if> /></td></tr>
+            <tr><td><label for="keyPrefix">Object key prefix</label></td><td><input id="keyPrefix" name="keyPrefix" size="50" maxlength="500" value="${admin:escapeHTMLTags(keyPrefix)}" /></td></tr>
+        </table>
+    </admin:contentBox>
+
+    <admin:contentBox title="XEP-0363 service">
+        <table>
+            <tr><td><label for="serviceSubdomain">Service subdomain</label></td><td><input id="serviceSubdomain" name="serviceSubdomain" size="30" maxlength="100" value="${admin:escapeHTMLTags(serviceSubdomain)}" required /></td></tr>
+            <tr><td><label for="maxFileSize">Maximum file size (bytes)</label></td><td><input id="maxFileSize" name="maxFileSize" type="number" min="-1" value="${maxFileSize}" required /></td></tr>
+            <tr><td><label for="putExpirationSeconds">PUT URL lifetime (seconds)</label></td><td><input id="putExpirationSeconds" name="putExpirationSeconds" type="number" min="1" max="604800" value="${putExpirationSeconds}" required /></td></tr>
+            <tr><td><label for="getExpirationSeconds">GET URL lifetime (seconds)</label></td><td><input id="getExpirationSeconds" name="getExpirationSeconds" type="number" min="1" max="604800" value="${getExpirationSeconds}" required /></td></tr>
+        </table>
+    </admin:contentBox>
+
+    <input type="submit" name="update" value="Save settings" />
+</form>
+</body>
+</html>
