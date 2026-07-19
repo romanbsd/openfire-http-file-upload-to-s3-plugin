@@ -4,8 +4,8 @@
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import java.nio.charset.StandardCharsets;
+import java.util.IdentityHashMap;
 import java.util.Objects;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 
 import org.dom4j.Element;
@@ -17,13 +17,12 @@ final class S3UploadComponent extends AbstractComponent {
     static final String UPLOAD_NAMESPACE = "urn:xmpp:http:upload:0";
     private static final String DATA_FORMS_NAMESPACE = "jabber:x:data";
 
-    // Unfair mode suffices: readers still cannot barge past a queued writer, and the
-    // write load (admin reconfigures) is far too rare to starve.
-    private final ReentrantReadWriteLock serviceLifecycleLock = new ReentrantReadWriteLock();
+    private final Object serviceLifecycleMonitor = new Object();
+    private final IdentityHashMap<UploadSlotService, ServiceState> serviceStates = new IdentityHashMap<>();
     private final Function<S3UploadConfiguration, UploadSlotService> serviceFactory;
     private volatile S3UploadConfiguration configuration;
     private UploadSlotService slotService;
-    private boolean shutdown; // guarded by serviceLifecycleLock's write lock
+    private boolean shutdown; // guarded by serviceLifecycleMonitor
 
     S3UploadComponent(S3UploadConfiguration configuration) {
         this(configuration, S3UploadComponent::createService);
@@ -41,6 +40,9 @@ final class S3UploadComponent extends AbstractComponent {
         this.configuration = Objects.requireNonNull(configuration);
         this.serviceFactory = Objects.requireNonNull(serviceFactory);
         this.slotService = serviceFactory.apply(configuration);
+        if (slotService != null) {
+            serviceStates.put(slotService, new ServiceState());
+        }
     }
 
     @Override
@@ -104,12 +106,11 @@ final class S3UploadComponent extends AbstractComponent {
     }
 
     IQ handleSlotRequest(IQ iq) {
-        // Readers presign concurrently; writers cannot close a service until its active requests finish.
-        serviceLifecycleLock.readLock().lock();
+        final ServiceLease lease = acquireService();
         try {
-            return handleSlotRequest(iq, configuration, slotService);
+            return handleSlotRequest(iq, lease.configuration(), lease.service());
         } finally {
-            serviceLifecycleLock.readLock().unlock();
+            releaseService(lease.service());
         }
     }
 
@@ -171,36 +172,74 @@ final class S3UploadComponent extends AbstractComponent {
     void reconfigure(S3UploadConfiguration newConfiguration) {
         Objects.requireNonNull(newConfiguration);
         final UploadSlotService replacement = serviceFactory.apply(newConfiguration);
-        serviceLifecycleLock.writeLock().lock();
-        try {
+        final UploadSlotService serviceToClose;
+        synchronized (serviceLifecycleMonitor) {
             if (shutdown) {
-                // A racing shutdown already closed the current service; don't install (and leak) a new one.
-                closeQuietly(replacement);
-                return;
+                // A racing shutdown won. Retire the replacement without waiting for any
+                // request that might already be using the same service instance.
+                serviceToClose = retireService(replacement);
+            } else {
+                final UploadSlotService previous = slotService;
+                configuration = newConfiguration;
+                slotService = replacement;
+                if (replacement != null) {
+                    serviceStates.computeIfAbsent(replacement, ignored -> new ServiceState()).retired = false;
+                }
+                serviceToClose = previous != replacement ? retireService(previous) : null;
             }
-            final UploadSlotService previous = slotService;
-            configuration = newConfiguration;
-            slotService = replacement;
-            if (previous != null && previous != replacement) {
-                closeQuietly(previous);
-            }
-        } finally {
-            serviceLifecycleLock.writeLock().unlock();
         }
+        closeQuietly(serviceToClose);
     }
 
     @Override
     public void preComponentShutdown() {
-        serviceLifecycleLock.writeLock().lock();
-        try {
+        final UploadSlotService serviceToClose;
+        synchronized (serviceLifecycleMonitor) {
             shutdown = true;
-            if (slotService != null) {
-                closeQuietly(slotService);
-                slotService = null;
-            }
-        } finally {
-            serviceLifecycleLock.writeLock().unlock();
+            serviceToClose = retireService(slotService);
+            slotService = null;
         }
+        closeQuietly(serviceToClose);
+    }
+
+    private ServiceLease acquireService() {
+        synchronized (serviceLifecycleMonitor) {
+            final UploadSlotService service = slotService;
+            if (service != null) {
+                serviceStates.computeIfAbsent(service, ignored -> new ServiceState()).activeRequests++;
+            }
+            return new ServiceLease(configuration, service);
+        }
+    }
+
+    private void releaseService(UploadSlotService service) {
+        if (service == null) {
+            return;
+        }
+        final UploadSlotService serviceToClose;
+        synchronized (serviceLifecycleMonitor) {
+            final ServiceState state = serviceStates.get(service);
+            state.activeRequests--;
+            serviceToClose = state.retired && state.activeRequests == 0 ? markClosed(service, state) : null;
+        }
+        closeQuietly(serviceToClose);
+    }
+
+    private UploadSlotService retireService(UploadSlotService service) {
+        if (service == null) {
+            return null;
+        }
+        final ServiceState state = serviceStates.computeIfAbsent(service, ignored -> new ServiceState());
+        state.retired = true;
+        return state.activeRequests == 0 ? markClosed(service, state) : null;
+    }
+
+    private static UploadSlotService markClosed(UploadSlotService service, ServiceState state) {
+        if (state.closed) {
+            return null;
+        }
+        state.closed = true;
+        return service;
     }
 
     private void closeQuietly(UploadSlotService service) {
@@ -259,5 +298,14 @@ final class S3UploadComponent extends AbstractComponent {
 
     private static boolean containsControlCharacter(String value) {
         return value.codePoints().anyMatch(Character::isISOControl);
+    }
+
+    private record ServiceLease(S3UploadConfiguration configuration, UploadSlotService service) {
+    }
+
+    private static final class ServiceState {
+        private int activeRequests;
+        private boolean retired;
+        private boolean closed;
     }
 }

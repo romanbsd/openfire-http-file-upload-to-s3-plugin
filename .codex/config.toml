@@ -1,3 +1,9 @@
 [mcp_servers.maven-indexer]
 command = "npx"
 args = ["-y", "maven-indexer-mcp@latest"]
+
+[mcp_servers.maven-indexer.tools.get_class_details]
+approval_mode = "approve"
+
+[mcp_servers.maven-indexer.tools.search_implementations]
+approval_mode = "approve"

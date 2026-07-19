@@ -196,7 +196,7 @@ class S3UploadComponentTest {
     }
 
     @Test
-    void reconfigureWaitsForInFlightPresignBeforeClosingService() throws Exception {
+    void reconfigureDoesNotWaitForInFlightPresignAndClosesServiceAfterward() throws Exception {
         final CountDownLatch signingStarted = new CountDownLatch(1);
         final CountDownLatch releaseSigning = new CountDownLatch(1);
         final CountDownLatch replacementCreated = new CountDownLatch(1);
@@ -221,12 +221,40 @@ class S3UploadComponentTest {
 
             final Future<?> reload = executor.submit(() -> component.reconfigure(configuration(20)));
             assertTrue(replacementCreated.await(5, TimeUnit.SECONDS));
-            assertFalse(reload.isDone());
+            reload.get(5, TimeUnit.SECONDS);
+            assertFalse(firstDelegate.closed);
 
             releaseSigning.countDown();
             assertEquals(IQ.Type.result, upload.get(5, TimeUnit.SECONDS).getType());
-            reload.get(5, TimeUnit.SECONDS);
             assertTrue(firstDelegate.closed);
+        } finally {
+            releaseSigning.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void shutdownDoesNotWaitForInFlightPresignAndClosesServiceAfterward() throws Exception {
+        final CountDownLatch signingStarted = new CountDownLatch(1);
+        final CountDownLatch releaseSigning = new CountDownLatch(1);
+        final FakeSlotService delegate = new FakeSlotService();
+        final UploadSlotService service = new BlockingSlotService(delegate, signingStarted, releaseSigning);
+        final S3UploadComponent component = new S3UploadComponent(configuration(10), service);
+        final ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            final Future<IQ> upload = executor.submit(
+                () -> component.handleSlotRequest(request("in-flight.txt", "1", null)));
+            assertTrue(signingStarted.await(5, TimeUnit.SECONDS));
+
+            final Future<?> shutdown = executor.submit(component::preComponentShutdown);
+            shutdown.get(5, TimeUnit.SECONDS);
+            assertFalse(delegate.closed);
+
+            releaseSigning.countDown();
+            assertEquals(IQ.Type.result, upload.get(5, TimeUnit.SECONDS).getType());
+            assertTrue(delegate.closed);
         } finally {
             releaseSigning.countDown();
             executor.shutdownNow();
