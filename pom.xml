@@ -27,7 +27,7 @@
     <properties>
         <aws.sdk.version>2.48.4</aws.sdk.version>
         <errorprone.version>2.50.0</errorprone.version>
-        <junit.version>5.12.2</junit.version>
+        <junit.version>6.1.2</junit.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
     </properties>
 
