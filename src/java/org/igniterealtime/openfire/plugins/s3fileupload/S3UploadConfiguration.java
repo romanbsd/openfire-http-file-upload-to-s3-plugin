@@ -170,9 +170,9 @@ public final class S3UploadConfiguration {
         try {
             final URI uri = URI.create(endpoint);
             if (!uri.isAbsolute() || uri.getHost() == null) {
-                errors.add("S3 endpoint must be an absolute HTTP(S) URL");
-            } else if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
-                errors.add("S3 endpoint must use HTTP or HTTPS");
+                errors.add("S3 endpoint must be an absolute HTTPS URL");
+            } else if (!"https".equalsIgnoreCase(uri.getScheme())) {
+                errors.add("S3 endpoint must use HTTPS");
             } else if (uri.getRawUserInfo() != null
                 || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
                 || uri.getRawQuery() != null

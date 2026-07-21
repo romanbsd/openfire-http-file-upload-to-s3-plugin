@@ -7,3 +7,6 @@ approval_mode = "approve"
 
 [mcp_servers.maven-indexer.tools.search_implementations]
 approval_mode = "approve"
+
+[mcp_servers.maven-indexer.tools.search_classes]
+approval_mode = "approve"

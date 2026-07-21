@@ -84,9 +84,14 @@ class S3UploadConfigurationTest {
         final S3UploadConfiguration relative = new S3UploadConfiguration(
             "files", "us-east-1", "/s3", false, true, "", "", "files", "upload",
             1024, Duration.ofMinutes(5), Duration.ofHours(1));
+        final S3UploadConfiguration insecure = new S3UploadConfiguration(
+            "files", "us-east-1", "http://minio.example.test:9000", true, true, "", "", "files", "upload",
+            1024, Duration.ofMinutes(5), Duration.ofHours(1));
 
         assertFalse(malformed.isReady());
         assertFalse(relative.isReady());
+        assertFalse(insecure.isReady());
+        assertTrue(insecure.validationErrors().contains("S3 endpoint must use HTTPS"));
     }
 
     @Test

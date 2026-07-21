@@ -68,8 +68,13 @@ For browser clients, configure bucket CORS to allow `PUT`, `GET`, and `HEAD` fro
 ## Security and behavior
 
 - Only local Openfire users can request slots.
+- Every authenticated local user can request an unlimited number of slots. The maximum file size limits each
+  object, not a user's total storage or bandwidth consumption. Deployments with untrusted, compromised, or
+  self-registered accounts must enforce suitable account policy and monitor S3 storage and egress usage; use
+  bucket lifecycle policies and AWS budget or provider billing alerts as additional safeguards.
 - Object keys contain a random UUID and a sanitized copy of the original filename.
 - The requested size is bound into the S3 PUT request, and the content type is bound when supplied.
+- Endpoint overrides must use HTTPS so that file contents and presigned URLs are protected in transit.
 - Presigned URLs can be used by anyone who obtains them until they expire. Use short lifetimes and encrypted XMPP attachments where appropriate.
 - S3 lifecycle policies should delete abandoned or expired uploads; this plugin does not delete objects.
 
