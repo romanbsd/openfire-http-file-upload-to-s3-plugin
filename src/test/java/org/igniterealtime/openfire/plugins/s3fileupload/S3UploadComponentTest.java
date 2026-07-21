@@ -3,9 +3,11 @@ package org.igniterealtime.openfire.plugins.s3fileupload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -99,14 +101,14 @@ class S3UploadComponentTest {
     }
 
     @Test
-    void acceptsZeroByteFiles() {
+    void rejectsZeroByteFiles() {
         final FakeSlotService service = new FakeSlotService();
         final S3UploadComponent component = new S3UploadComponent(configuration(1024), service);
 
         final IQ response = component.handleSlotRequest(request("empty.txt", "0", null));
 
-        assertEquals(IQ.Type.result, response.getType());
-        assertEquals(0, service.lastRequest.size());
+        assertError(response, PacketError.Condition.bad_request);
+        assertNull(service.lastRequest);
     }
 
     @Test
@@ -161,21 +163,23 @@ class S3UploadComponentTest {
 
     @Test
     void reconfigureForgetsClosedServices() {
-        final AtomicInteger createdServices = new AtomicInteger();
+        final List<FakeSlotService> createdServices = new ArrayList<>();
         final S3UploadComponent component = new S3UploadComponent(
             configuration(10), ignored -> {
-                createdServices.incrementAndGet();
-                return new FakeSlotService();
+                final FakeSlotService service = new FakeSlotService();
+                createdServices.add(service);
+                return service;
             });
 
         for (int index = 0; index < 20; index++) {
             component.reconfigure(configuration(index + 20));
         }
 
-        assertEquals(21, createdServices.get());
-        assertEquals(1, component.trackedServiceCount());
+        assertEquals(21, createdServices.size());
+        assertTrue(createdServices.subList(0, 20).stream().allMatch(service -> service.closed));
+        assertFalse(createdServices.get(20).closed);
         component.preComponentShutdown();
-        assertEquals(0, component.trackedServiceCount());
+        assertTrue(createdServices.get(20).closed);
     }
 
     @Test

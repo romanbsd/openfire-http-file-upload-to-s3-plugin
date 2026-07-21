@@ -4,7 +4,6 @@
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
 import java.nio.charset.StandardCharsets;
-import java.util.IdentityHashMap;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -18,10 +17,9 @@ final class S3UploadComponent extends AbstractComponent {
     private static final String DATA_FORMS_NAMESPACE = "jabber:x:data";
 
     private final Object serviceLifecycleMonitor = new Object();
-    private final IdentityHashMap<UploadSlotService, ServiceState> serviceStates = new IdentityHashMap<>();
     private final Function<S3UploadConfiguration, UploadSlotService> serviceFactory;
     private volatile S3UploadConfiguration configuration;
-    private UploadSlotService slotService;
+    private ServiceReference slotService;
     private boolean shutdown; // guarded by serviceLifecycleMonitor
 
     S3UploadComponent(S3UploadConfiguration configuration) {
@@ -39,10 +37,7 @@ final class S3UploadComponent extends AbstractComponent {
         super(4, 1000, true); // presigning is cheap local work; a modest pool absorbs bursts
         this.configuration = Objects.requireNonNull(configuration);
         this.serviceFactory = Objects.requireNonNull(serviceFactory);
-        this.slotService = serviceFactory.apply(configuration);
-        if (slotService != null) {
-            serviceStates.put(slotService, new ServiceState());
-        }
+        this.slotService = reference(serviceFactory.apply(configuration));
     }
 
     @Override
@@ -110,7 +105,7 @@ final class S3UploadComponent extends AbstractComponent {
         try {
             return handleSlotRequest(iq, lease.configuration(), lease.service());
         } finally {
-            releaseService(lease.service());
+            releaseService(lease.serviceReference());
         }
     }
 
@@ -133,7 +128,7 @@ final class S3UploadComponent extends AbstractComponent {
 
         final long size = parseSize(request.attributeValue("size"));
         if (size < 0) {
-            return badRequest(iq, "size must be a non-negative integer");
+            return badRequest(iq, "size must be a positive integer");
         }
 
         if (current.maxFileSize() > -1 && size > current.maxFileSize()) {
@@ -175,17 +170,16 @@ final class S3UploadComponent extends AbstractComponent {
         final UploadSlotService serviceToClose;
         synchronized (serviceLifecycleMonitor) {
             if (shutdown) {
-                // A racing shutdown won. Retire the replacement without waiting for any
-                // request that might already be using the same service instance.
-                serviceToClose = retireService(replacement);
+                serviceToClose = replacement;
             } else {
-                final UploadSlotService previous = slotService;
+                final ServiceReference previous = slotService;
                 configuration = newConfiguration;
-                slotService = replacement;
-                if (replacement != null) {
-                    serviceStates.computeIfAbsent(replacement, ignored -> new ServiceState()).retired = false;
+                if (previous != null && previous.service == replacement) {
+                    serviceToClose = null;
+                } else {
+                    slotService = reference(replacement);
+                    serviceToClose = retireService(previous);
                 }
-                serviceToClose = previous != replacement ? retireService(previous) : null;
             }
         }
         closeQuietly(serviceToClose);
@@ -204,45 +198,37 @@ final class S3UploadComponent extends AbstractComponent {
 
     private ServiceLease acquireService() {
         synchronized (serviceLifecycleMonitor) {
-            final UploadSlotService service = slotService;
-            if (service != null) {
-                serviceStates.computeIfAbsent(service, ignored -> new ServiceState()).activeRequests++;
+            final ServiceReference serviceReference = slotService;
+            if (serviceReference != null) {
+                serviceReference.activeRequests++;
             }
-            return new ServiceLease(configuration, service);
+            return new ServiceLease(configuration, serviceReference);
         }
     }
 
-    private void releaseService(UploadSlotService service) {
-        if (service == null) {
+    private void releaseService(ServiceReference serviceReference) {
+        if (serviceReference == null) {
             return;
         }
         final UploadSlotService serviceToClose;
         synchronized (serviceLifecycleMonitor) {
-            final ServiceState state = serviceStates.get(service);
-            state.activeRequests--;
-            serviceToClose = state.retired && state.activeRequests == 0 ? markClosed(service) : null;
+            serviceReference.activeRequests--;
+            serviceToClose = serviceReference.retired && serviceReference.activeRequests == 0
+                ? serviceReference.service : null;
         }
         closeQuietly(serviceToClose);
     }
 
-    private UploadSlotService retireService(UploadSlotService service) {
-        if (service == null) {
+    private UploadSlotService retireService(ServiceReference serviceReference) {
+        if (serviceReference == null) {
             return null;
         }
-        final ServiceState state = serviceStates.computeIfAbsent(service, ignored -> new ServiceState());
-        state.retired = true;
-        return state.activeRequests == 0 ? markClosed(service) : null;
+        serviceReference.retired = true;
+        return serviceReference.activeRequests == 0 ? serviceReference.service : null;
     }
 
-    private UploadSlotService markClosed(UploadSlotService service) {
-        serviceStates.remove(service);
-        return service;
-    }
-
-    int trackedServiceCount() {
-        synchronized (serviceLifecycleMonitor) {
-            return serviceStates.size();
-        }
+    private static ServiceReference reference(UploadSlotService service) {
+        return service == null ? null : new ServiceReference(service);
     }
 
     private void closeQuietly(UploadSlotService service) {
@@ -293,7 +279,7 @@ final class S3UploadComponent extends AbstractComponent {
         }
         try {
             final long parsed = Long.parseLong(value);
-            return parsed >= 0 ? parsed : -1;
+            return parsed > 0 ? parsed : -1;
         } catch (NumberFormatException e) {
             return -1;
         }
@@ -303,11 +289,22 @@ final class S3UploadComponent extends AbstractComponent {
         return value.codePoints().anyMatch(Character::isISOControl);
     }
 
-    private record ServiceLease(S3UploadConfiguration configuration, UploadSlotService service) {
+    private record ServiceLease(
+        S3UploadConfiguration configuration,
+        ServiceReference serviceReference
+    ) {
+        private UploadSlotService service() {
+            return serviceReference == null ? null : serviceReference.service;
+        }
     }
 
-    private static final class ServiceState {
+    private static final class ServiceReference {
+        private final UploadSlotService service;
         private int activeRequests;
         private boolean retired;
+
+        private ServiceReference(UploadSlotService service) {
+            this.service = service;
+        }
     }
 }

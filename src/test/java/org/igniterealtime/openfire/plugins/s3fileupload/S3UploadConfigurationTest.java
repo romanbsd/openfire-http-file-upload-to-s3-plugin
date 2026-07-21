@@ -88,4 +88,22 @@ class S3UploadConfigurationTest {
         assertFalse(malformed.isReady());
         assertFalse(relative.isReady());
     }
+
+    @Test
+    void rejectsEndpointsContainingMoreThanAnAuthority() {
+        for (String endpoint : new String[] {
+            "https://minio.example.test/",
+            "https://minio.example.test/proxy",
+            "https://user:password@minio.example.test",
+            "https://minio.example.test?region=local",
+            "https://minio.example.test#configuration"}) {
+            final S3UploadConfiguration configuration = new S3UploadConfiguration(
+                "files", "local", endpoint, true, true, "", "", "", "upload",
+                1024, Duration.ofMinutes(5), Duration.ofHours(1));
+
+            assertFalse(configuration.isReady(), endpoint);
+            assertTrue(configuration.validationErrors().contains(
+                "S3 endpoint must contain only a scheme, host, and optional port"), endpoint);
+        }
+    }
 }

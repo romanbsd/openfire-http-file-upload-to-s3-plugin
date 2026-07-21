@@ -173,6 +173,11 @@ public final class S3UploadConfiguration {
                 errors.add("S3 endpoint must be an absolute HTTP(S) URL");
             } else if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
                 errors.add("S3 endpoint must use HTTP or HTTPS");
+            } else if (uri.getRawUserInfo() != null
+                || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
+                || uri.getRawQuery() != null
+                || uri.getRawFragment() != null) {
+                errors.add("S3 endpoint must contain only a scheme, host, and optional port");
             }
             return uri;
         } catch (IllegalArgumentException e) {

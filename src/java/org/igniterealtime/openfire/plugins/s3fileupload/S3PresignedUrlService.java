@@ -29,8 +29,10 @@ final class S3PresignedUrlService implements UploadSlotService {
     private final S3Presigner presigner;
 
     S3PresignedUrlService(S3UploadConfiguration configuration) {
-        this(configuration, createPresigner(requireValid(configuration)),
-            new S3ObjectKeyFactory(configuration.keyPrefix()));
+        final S3UploadConfiguration validConfiguration = requireValid(configuration);
+        this.configuration = validConfiguration;
+        this.presigner = createPresigner(validConfiguration);
+        this.keyFactory = new S3ObjectKeyFactory(validConfiguration.keyPrefix());
     }
 
     S3PresignedUrlService(
