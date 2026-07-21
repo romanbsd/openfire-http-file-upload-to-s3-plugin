@@ -114,11 +114,14 @@ final class S3UploadComponentLifecycle implements AutoCloseable {
     @Override
     public void close() {
         if (component != null) {
+            final Registration registration = new Registration(registeredSubdomain, component);
             try {
-                registry.remove(registeredSubdomain, component);
+                registry.remove(registration.subdomain(), registration.component());
             } catch (RuntimeException e) {
-                component.preComponentShutdown();
-                Log.warn("Unable to remove S3 upload component at subdomain '{}'.", registeredSubdomain, e);
+                registration.component().preComponentShutdown();
+                retiredComponents.add(registration);
+                Log.warn("Unable to remove S3 upload component at subdomain '{}'; will retry.",
+                    registration.subdomain(), e);
             }
             component = null;
             registeredSubdomain = null;

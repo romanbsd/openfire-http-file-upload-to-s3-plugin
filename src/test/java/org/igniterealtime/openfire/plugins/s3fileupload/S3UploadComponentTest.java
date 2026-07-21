@@ -160,6 +160,25 @@ class S3UploadComponentTest {
     }
 
     @Test
+    void reconfigureForgetsClosedServices() {
+        final AtomicInteger createdServices = new AtomicInteger();
+        final S3UploadComponent component = new S3UploadComponent(
+            configuration(10), ignored -> {
+                createdServices.incrementAndGet();
+                return new FakeSlotService();
+            });
+
+        for (int index = 0; index < 20; index++) {
+            component.reconfigure(configuration(index + 20));
+        }
+
+        assertEquals(21, createdServices.get());
+        assertEquals(1, component.trackedServiceCount());
+        component.preComponentShutdown();
+        assertEquals(0, component.trackedServiceCount());
+    }
+
+    @Test
     void reconfigureAfterShutdownClosesReplacementAndStaysDown() {
         final FakeSlotService first = new FakeSlotService();
         final FakeSlotService second = new FakeSlotService();
@@ -295,30 +314,6 @@ class S3UploadComponentTest {
     private static S3UploadConfiguration configuration(long maxSize) {
         return new S3UploadConfiguration("files", "us-east-1", "", false, true, "", "", "xmpp", "upload",
             maxSize, Duration.ofMinutes(5), Duration.ofDays(7));
-    }
-
-    private static final class FakeSlotService implements UploadSlotService {
-        private UploadRequest lastRequest;
-        private RuntimeException failure;
-        private RuntimeException closeFailure;
-        private boolean closed;
-
-        @Override
-        public UploadSlot createSlot(UploadRequest request) {
-            if (failure != null) {
-                throw failure;
-            }
-            lastRequest = request;
-            return new UploadSlot("https://s3.test/put?a=1&b=2", "https://s3.test/get?a=1&b=2");
-        }
-
-        @Override
-        public void close() {
-            closed = true;
-            if (closeFailure != null) {
-                throw closeFailure;
-            }
-        }
     }
 
     private record BlockingSlotService(

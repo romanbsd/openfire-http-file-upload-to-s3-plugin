@@ -30,9 +30,14 @@
         final String submittedAccessKey = request.getParameter("accessKey");
         final String submittedSecretKey = request.getParameter("secretKey");
         final String accessKey = useDefaultAwsCredentials ? "" : submittedAccessKey;
-        final String secretKey = useDefaultAwsCredentials ? ""
-            : submittedSecretKey == null || submittedSecretKey.isEmpty()
-                ? existingConfiguration.secretKey() : submittedSecretKey;
+        final String secretKey;
+        if (useDefaultAwsCredentials) {
+            secretKey = "";
+        } else if (submittedSecretKey == null || submittedSecretKey.isEmpty()) {
+            secretKey = existingConfiguration.secretKey();
+        } else {
+            secretKey = submittedSecretKey;
+        }
         final String keyPrefix = request.getParameter("keyPrefix");
         final String serviceSubdomain = request.getParameter("serviceSubdomain");
         final long maxFileSize = ParamUtils.getLongParameter(request, "maxFileSize",

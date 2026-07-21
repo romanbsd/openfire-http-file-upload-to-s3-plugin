@@ -220,7 +220,7 @@ final class S3UploadComponent extends AbstractComponent {
         synchronized (serviceLifecycleMonitor) {
             final ServiceState state = serviceStates.get(service);
             state.activeRequests--;
-            serviceToClose = state.retired && state.activeRequests == 0 ? markClosed(service, state) : null;
+            serviceToClose = state.retired && state.activeRequests == 0 ? markClosed(service) : null;
         }
         closeQuietly(serviceToClose);
     }
@@ -231,15 +231,18 @@ final class S3UploadComponent extends AbstractComponent {
         }
         final ServiceState state = serviceStates.computeIfAbsent(service, ignored -> new ServiceState());
         state.retired = true;
-        return state.activeRequests == 0 ? markClosed(service, state) : null;
+        return state.activeRequests == 0 ? markClosed(service) : null;
     }
 
-    private static UploadSlotService markClosed(UploadSlotService service, ServiceState state) {
-        if (state.closed) {
-            return null;
-        }
-        state.closed = true;
+    private UploadSlotService markClosed(UploadSlotService service) {
+        serviceStates.remove(service);
         return service;
+    }
+
+    int trackedServiceCount() {
+        synchronized (serviceLifecycleMonitor) {
+            return serviceStates.size();
+        }
     }
 
     private void closeQuietly(UploadSlotService service) {
@@ -306,6 +309,5 @@ final class S3UploadComponent extends AbstractComponent {
     private static final class ServiceState {
         private int activeRequests;
         private boolean retired;
-        private boolean closed;
     }
 }

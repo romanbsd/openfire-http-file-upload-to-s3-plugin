@@ -3,8 +3,10 @@
  */
 package org.igniterealtime.openfire.plugins.s3fileupload;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -20,6 +22,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import software.amazon.awssdk.utils.http.SdkHttpUtils;
 
 final class S3PresignedUrlService implements UploadSlotService {
+    private static final Pattern NON_PRINTABLE_ASCII = Pattern.compile("[^\\x20-\\x7E]");
+
     private final S3UploadConfiguration configuration;
     private final S3ObjectKeyFactory keyFactory;
     private final S3Presigner presigner;
@@ -42,28 +46,26 @@ final class S3PresignedUrlService implements UploadSlotService {
     @Override
     public UploadSlot createSlot(UploadRequest request) {
         final String key = keyFactory.create(request.filename());
-        final boolean hasContentType = request.contentType() != null && !request.contentType().isBlank();
+        final String contentType = request.contentType();
+        final boolean hasContentType = contentType != null && !contentType.isBlank();
 
         final PutObjectRequest.Builder putObject = PutObjectRequest.builder()
             .bucket(configuration.bucket())
             .key(key)
             .contentLength(request.size());
+        final GetObjectRequest.Builder getObject = GetObjectRequest.builder()
+            .bucket(configuration.bucket())
+            .key(key)
+            .responseContentDisposition(contentDisposition(request.filename()));
         if (hasContentType) {
-            putObject.contentType(request.contentType());
+            putObject.contentType(contentType);
+            getObject.responseContentType(contentType);
         }
 
         final String putUrl = presigner.presignPutObject(PutObjectPresignRequest.builder()
             .signatureDuration(configuration.putExpiration())
             .putObjectRequest(putObject.build())
             .build()).url().toExternalForm();
-
-        final GetObjectRequest.Builder getObject = GetObjectRequest.builder()
-            .bucket(configuration.bucket())
-            .key(key)
-            .responseContentDisposition(contentDisposition(request.filename()));
-        if (hasContentType) {
-            getObject.responseContentType(request.contentType());
-        }
 
         final String getUrl = presigner.presignGetObject(GetObjectPresignRequest.builder()
             .signatureDuration(configuration.getExpiration())
@@ -85,8 +87,9 @@ final class S3PresignedUrlService implements UploadSlotService {
             .serviceConfiguration(S3Configuration.builder()
                 .pathStyleAccessEnabled(configuration.pathStyleAccess())
                 .build());
-        if (configuration.endpointUri() != null) {
-            builder.endpointOverride(configuration.endpointUri());
+        final URI endpoint = configuration.endpointUri();
+        if (endpoint != null) {
+            builder.endpointOverride(endpoint);
         }
         return builder.build();
     }
@@ -109,7 +112,8 @@ final class S3PresignedUrlService implements UploadSlotService {
     }
 
     private static String contentDisposition(String filename) {
-        final String asciiFallback = filename.replaceAll("[^\\x20-\\x7E]", "_").replace("\\", "_").replace("\"", "_");
+        final String asciiFallback = NON_PRINTABLE_ASCII.matcher(filename).replaceAll("_")
+            .replace("\\", "_").replace("\"", "_");
         return "attachment; filename=\"" + asciiFallback + "\"; filename*=UTF-8''"
             + SdkHttpUtils.urlEncode(filename);
     }

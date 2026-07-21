@@ -69,6 +69,27 @@ class S3UploadComponentLifecycleTest {
         assertEquals(0, lifecycle.retiredComponentCount());
     }
 
+    @Test
+    void closeTracksAComponentUntilFailedRemovalCanBeRetried() {
+        final FakeRegistry registry = new FakeRegistry();
+        final List<FakeSlotService> services = new ArrayList<>();
+        final S3UploadComponentLifecycle lifecycle = lifecycle(registry, services);
+        assertTrue(lifecycle.install(configuration("upload")));
+        registry.removeFailures = 2;
+
+        lifecycle.close();
+
+        assertFalse(lifecycle.isInstalled());
+        assertTrue(services.get(0).closed);
+        assertEquals(1, lifecycle.retiredComponentCount());
+
+        lifecycle.retryRetiredComponents();
+
+        assertEquals(List.of("upload"), registry.removedSubdomains);
+        assertEquals(3, registry.removeAttempts);
+        assertEquals(0, lifecycle.retiredComponentCount());
+    }
+
     private static S3UploadComponentLifecycle lifecycle(
         FakeRegistry registry,
         List<FakeSlotService> services
@@ -110,17 +131,4 @@ class S3UploadComponentLifecycleTest {
         }
     }
 
-    private static final class FakeSlotService implements UploadSlotService {
-        private boolean closed;
-
-        @Override
-        public UploadSlot createSlot(UploadRequest request) {
-            return new UploadSlot("https://put.example", "https://get.example");
-        }
-
-        @Override
-        public void close() {
-            closed = true;
-        }
-    }
 }
